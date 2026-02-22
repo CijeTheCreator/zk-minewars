@@ -139,21 +139,76 @@ pub struct GameProposed {
 pub struct GameJoined {
     pub id: u32,
     pub player2: Address,
+    pub board: Vec<Vec<Tile>>,
+}
+
+#[contractevent]
+pub struct GameAbandoned {
+    pub id: u32,
+    pub abandoner: u32,
+}
+
+#[contractevent]
+pub struct MinesCommited {
+    pub id: u32,
+    pub mines: Bytes,
+    pub player: u32,
+}
+
+#[contractevent]
+pub struct GameStarted {
+    pub id: u32,
+}
+
+#[contractevent]
+pub struct GameEnded {
+    pub id: u32,
+    pub result: GameResult,
+}
+
+#[contractevent]
+pub struct WinnerAwarded {
+    pub id: u32,
+    pub result: GameResult,
+    pub player_1: i128,
+    pub player_2: i128,
+}
+
+#[contractevent]
+pub struct TurnPlayed {
+    pub game_id: u32,
+    pub next_round_x: u32,
+    pub next_round_y: u32,
+    pub player_address: Address,
+    pub player_number: u32,
+    pub previous_tile_is_mine: bool,
+    pub next_round_tile_revealed_value: u32,
+    pub previous_round_proof: Bytes,
+    pub next_round_proof: Bytes,
+    pub next_player_turn: u32,
+    pub next_move_window: u64,
+    pub board: Vec<Vec<Tile>>,
+}
+
+#[contractevent]
+pub struct BoardInitialized {
+    pub game_id: u32,
+    pub board: Vec<Vec<Tile>>,
 }
 
 #[contractimpl]
 impl Contract {
-    pub fn __constructor(env: Env, _minebucks: Address, _verifier: Address, _gamehub: Address) {
-        env.storage().persistent().set(&DataKey::LastGameId, &0);
+    pub fn __constructor(env: Env, minebucks: Address, verifier: Address, gamehub: Address) {
+        env.storage().persistent().set(&DataKey::LastGameId, &0u32);
         env.storage()
             .persistent()
-            .set(&DataKey::MineBucksAddress, &_minebucks);
+            .set(&DataKey::MineBucksAddress, &minebucks);
         env.storage()
             .persistent()
-            .set(&DataKey::VerifierAddress, &_verifier);
+            .set(&DataKey::VerifierAddress, &verifier);
         env.storage()
             .persistent()
-            .set(&DataKey::GameHubAddress, &_gamehub);
+            .set(&DataKey::GameHubAddress, &gamehub);
     }
 
     pub fn propose_game(
@@ -170,7 +225,7 @@ impl Contract {
             .storage()
             .persistent()
             .get(&DataKey::LastGameId)
-            .unwrap();
+            .unwrap_or(0);
         let current_game_data = GameData {
             lives,
             rounds,
@@ -206,8 +261,8 @@ impl Contract {
         }
 
         let mut current_game_players: Map<u32, Address> = Map::new(&env);
-        current_game_players.set(0, player1.clone());
-        current_game_players.set(1, player2.clone());
+        current_game_players.set(0u32, player1.clone());
+        current_game_players.set(1u32, player2.clone());
 
         env.storage()
             .persistent()
@@ -247,7 +302,6 @@ impl Contract {
             .get(&DataKey::GameState(game_id))
             .unwrap();
 
-        //TODO: Set game state to lobby in start game
         if game_state != GameState::Lobby {
             panic_with_error!(&env, ContractError::Player2AlreadyJoined);
         }
@@ -352,6 +406,7 @@ impl Contract {
         GameJoined {
             id: game_id,
             player2,
+            board,
         }
         .publish(&env);
     }
@@ -426,7 +481,7 @@ impl Contract {
             panic_with_error!(&env, ContractError::UnauthorizedAbandonWindowAction);
         }
 
-        let is_player_1: bool = if player_number == 0 { true } else { false };
+        let is_player_1: bool = player_number == 0;
         let game_hub: Address = env
             .storage()
             .persistent()
@@ -477,6 +532,11 @@ impl Contract {
         env.storage()
             .persistent()
             .set(&DataKey::GameState(game_id), &game_state);
+        GameAbandoned {
+            id: game_id,
+            abandoner: player_number,
+        }
+        .publish(&env);
     }
 
     pub fn commit_mines(
@@ -512,10 +572,17 @@ impl Contract {
             .persistent()
             .get(&DataKey::Mines(game_id))
             .unwrap();
-        mines.set(player_number, private_mines);
+        mines.set(player_number, private_mines.clone());
         env.storage()
             .persistent()
             .set(&DataKey::Mines(game_id), &mines);
+
+        MinesCommited {
+            id: game_id,
+            mines: private_mines,
+            player: player_number,
+        }
+        .publish(&env);
 
         let other_player_number: u32 = if player_number == 0 { 1 } else { 0 };
         if mines.contains_key(other_player_number) {
@@ -550,6 +617,7 @@ impl Contract {
             env.storage()
                 .persistent()
                 .set(&DataKey::GameState(game_id), &game_state);
+            GameStarted { id: game_id }.publish(&env);
         }
     }
 
@@ -721,6 +789,7 @@ impl Contract {
             .persistent()
             .get(&DataKey::TimeWindow(game_id))
             .unwrap();
+        let next_move_window = current_timestamp + time_window;
         let mut move_windows: Map<u32, u64> = env
             .storage()
             .persistent()
@@ -823,6 +892,27 @@ impl Contract {
         env.storage()
             .persistent()
             .set(&DataKey::GameState(game_id), &GameState::Ended);
+        GameEnded {
+            id: game_id,
+            result: result.clone(),
+        }
+        .publish(&env);
+
+        TurnPlayed {
+            game_id,
+            next_round_x,
+            next_round_y,
+            player_address,
+            player_number,
+            previous_tile_is_mine,
+            next_round_tile_revealed_value,
+            previous_round_proof,
+            next_round_proof,
+            next_player_turn: other_player,
+            next_move_window,
+            board,
+        }
+        .publish(&env);
 
         if game_data.stake == 0 {
             return;
@@ -847,19 +937,60 @@ impl Contract {
                 &player_2,
                 &game_data.stake,
             );
+            WinnerAwarded {
+                id: game_id,
+                result,
+                player_1: game_data.stake,
+                player_2: game_data.stake,
+            }
+            .publish(&env);
         } else if result == GameResult::Player1 {
             TokenClient::new(&env, &minebucks).transfer(
                 &env.current_contract_address(),
                 &player_1,
                 &full_prize,
             );
+
+            WinnerAwarded {
+                id: game_id,
+                result,
+                player_1: full_prize,
+                player_2: 0,
+            }
+            .publish(&env);
         } else if result == GameResult::Player2 {
             TokenClient::new(&env, &minebucks).transfer(
                 &env.current_contract_address(),
                 &player_2,
                 &full_prize,
             );
+            WinnerAwarded {
+                id: game_id,
+                result,
+                player_1: 0,
+                player_2: full_prize,
+            }
+            .publish(&env);
         }
+    }
+
+    pub fn make_board(env: &Env) {
+        let mut board: Vec<Vec<Tile>> = Vec::new(env);
+        for _ in 0..9u32 {
+            let mut row: Vec<Tile> = Vec::new(env);
+            for _ in 0..9u32 {
+                row.push_back(Tile {
+                    revealed: false,
+                    value: TileValue::Hidden,
+                });
+            }
+            board.push_back(row);
+        }
+        BoardInitialized {
+            game_id: 0u32,
+            board,
+        }
+        .publish(env);
     }
 }
 
@@ -928,5 +1059,3 @@ fn init_board(env: &Env) -> Vec<Vec<Tile>> {
     }
     board
 }
-
-mod test;
