@@ -1,7 +1,4 @@
 #![no_std]
-
-use core::ops::Add;
-
 use soroban_sdk::{
     contract, contractclient, contracterror, contractevent, contractimpl, contracttype,
     panic_with_error, token::TokenClient, vec, Address, Bytes, Env, Map, String, Vec,
@@ -29,6 +26,7 @@ pub enum DataKey {
     Lives(u32),
     Round(u32),
     GameResult(u32),
+    GameHubAddress,
 }
 
 #[contracttype]
@@ -129,17 +127,12 @@ pub struct GameJoined {
 
 #[contractimpl]
 impl Contract {
-    pub fn hello(env: Env, to: String) -> Vec<String> {
-        vec![&env, String::from_str(&env, "Hello"), to]
+    pub fn __constructor(env: Env, _minebucks: Address, _verifier: Address, _gamehub: Address) {
+        env.storage().persistent().set(&DataKey::LastGameId, &0);
+        env.storage().persistent().set(&DataKey::MineBucksAddress, &_minebucks);
+        env.storage().persistent().set(&DataKey::VerifierAddress, &_verifier);
+        env.storage().persistent().set(&DataKey::GameHubAddress, &_gamehub);
     }
-
-    // pub fn __constructor(env: Env) {
-    //     let game_data: Map<u32, GameData> = Map::new(&env);
-    //     let players: Map<u32, Map<u32, Option<Address>>> = Map::new(&env);
-    //     let lives: Map<u32, u32> = Map::new(&env);
-    //     let rounds: Map<u32, u32> = Map::new(&env);
-    //     let lastGameId: u32 = 0;
-    // }
 
     pub fn propose_game(
         env: Env,
@@ -148,6 +141,7 @@ impl Contract {
         stake: i128,
         player1: Address,
         player2: Option<Address>,
+        time_window: u64,
     ) {
         player1.require_auth();
         let mut last_game_id: u32 = env
@@ -164,6 +158,7 @@ impl Contract {
         env.storage()
             .persistent()
             .set(&DataKey::GameData(last_game_id), &current_game_data);
+        env.storage().persistent().set(&DataKey::TimeWindow(last_game_id), &time_window);
 
         let minebucks: Address = env
             .storage()
@@ -255,6 +250,53 @@ pub fn join_game(env: Env, game_id: u32, player2: Address) {
         &env.current_contract_address(),
         &stake,
     );
+
+    /* Mappings/Values per player */
+    let mut move_windows: Map<u32, u64> = Map::new(&env);
+    let time_window: u64 = env
+        .storage()
+        .persistent()
+        .get(&DataKey::TimeWindow(game_id))
+        .unwrap();
+    let move_window: u64 = env.ledger().timestamp() + time_window;
+    move_windows.set(0, move_window);
+    move_windows.set(1, move_window);
+    env.storage()
+        .persistent()
+        .set(&DataKey::MoveWindows(game_id), &move_windows);
+
+    let mines: Map<u32, Bytes> = Map::new(&env);
+    env.storage()
+        .persistent()
+        .set(&DataKey::Mines(game_id), &mines);
+
+    let mut turns: Map<u32, bool> = Map::new(&env);
+    turns.set(0, true);
+    turns.set(1, false);
+    env.storage()
+        .persistent()
+        .set(&DataKey::Turns(game_id), &turns);
+
+    let submission: Map<u32, u32> = Map::new(&env);
+    env.storage()
+        .persistent()
+        .set(&DataKey::Submission(game_id), &submission);
+
+    let scores: Map<u32, u32> = Map::new(&env);
+    env.storage()
+        .persistent()
+        .set(&DataKey::Scores(game_id), &scores);
+
+    let mut lives: Map<u32, u32> = Map::new(&env);
+    lives.set(0, game_data.lives);
+    lives.set(1, game_data.lives);
+    env.storage()
+        .persistent()
+        .set(&DataKey::Lives(game_id), &lives);
+
+    env.storage().persistent().set(&DataKey::Round(game_id), &0);
+    let board = init_board(&env);
+    env.storage().persistent().set(&DataKey::Board(game_id), &board);
 
     GameJoined {
         id: game_id,
@@ -673,12 +715,14 @@ pub fn play_turn(
         .persistent()
         .set(&DataKey::GameState(game_id), &GameState::Ended);
 
-    
-
     let player_1: Address = players.get(0).unwrap();
     let player_2: Address = players.get(1).unwrap();
-    let minebucks: Address = env.storage().persistent().get(&DataKey::MineBucksAddress).unwrap();
-        let full_prize = &game_data.stake * 2;
+    let minebucks: Address = env
+        .storage()
+        .persistent()
+        .get(&DataKey::MineBucksAddress)
+        .unwrap();
+    let full_prize = &game_data.stake * 2;
     if result == GameResult::Draw {
         TokenClient::new(&env, &minebucks).transfer(
             &env.current_contract_address(),
@@ -703,7 +747,6 @@ pub fn play_turn(
             &full_prize,
         );
     }
-
 }
 
 /* Helper functions */
@@ -742,6 +785,21 @@ fn reveal_adjacent(cx: u32, cy: u32, board: &mut Vec<Vec<Tile>>) {
             }
         }
     }
+}
+
+fn init_board(env: &Env) -> Vec<Vec<Tile>> {
+    let mut board: Vec<Vec<Tile>> = Vec::new(env);
+    for _ in 0..9u32 {
+        let mut row: Vec<Tile> = Vec::new(env);
+        for _ in 0..9u32 {
+            row.push_back(Tile {
+                revealed: false,
+                value: TileValue::Hidden,
+            });
+        }
+        board.push_back(row);
+    }
+    board
 }
 
 mod test;
