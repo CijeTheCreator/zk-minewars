@@ -456,9 +456,16 @@ impl Contract {
             }
 
             game_state = GameState::Abandoned;
+
             env.storage()
                 .persistent()
                 .set(&DataKey::GameState(game_id), &game_state);
+
+            GameAbandoned {
+                id: game_id,
+                abandoner: player_number,
+            }
+            .publish(&env);
             return;
         }
 
@@ -852,6 +859,22 @@ impl Contract {
             .get(&DataKey::GameData(game_id))
             .unwrap();
 
+        TurnPlayed {
+            game_id,
+            next_round_x,
+            next_round_y,
+            player_address,
+            player_number,
+            previous_tile_is_mine,
+            next_round_tile_revealed_value,
+            previous_round_proof,
+            next_round_proof,
+            next_player_turn: other_player,
+            next_move_window,
+            board,
+        }
+        .publish(&env);
+
         if !(player_1_lives == 0 || player_2_lives == 0 || game_data.rounds == round) {
             return;
         }
@@ -895,22 +918,6 @@ impl Contract {
         GameEnded {
             id: game_id,
             result: result.clone(),
-        }
-        .publish(&env);
-
-        TurnPlayed {
-            game_id,
-            next_round_x,
-            next_round_y,
-            player_address,
-            player_number,
-            previous_tile_is_mine,
-            next_round_tile_revealed_value,
-            previous_round_proof,
-            next_round_proof,
-            next_player_turn: other_player,
-            next_move_window,
-            board,
         }
         .publish(&env);
 
