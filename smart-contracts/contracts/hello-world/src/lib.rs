@@ -447,12 +447,12 @@ impl Contract {
         if game_state != GameState::Commiting {
             panic_with_error!(&env, ContractError::GameNotCommiting);
         }
-        let players: Map<u32, Address> = env
+        let players: Map<u32, Option<Address>> = env
             .storage()
             .persistent()
             .get(&DataKey::Players(game_id))
             .unwrap();
-        let stored_player: Address = players.get(player_number).unwrap();
+        let stored_player: Address = players.get(player_number).unwrap().unwrap();
         if stored_player != player_address {
             panic_with_error!(&env, ContractError::UnauthroizedMineCommiter);
         }
@@ -529,12 +529,12 @@ impl Contract {
         }
 
         player_address.require_auth();
-        let players: Map<u32, Address> = env
+        let players: Map<u32, Option<Address>> = env
             .storage()
             .persistent()
             .get(&DataKey::Players(game_id))
             .unwrap();
-        let stored_player = players.get(player_number).unwrap();
+        let stored_player = players.get(player_number).unwrap().unwrap();
         if stored_player != player_address {
             panic_with_error!(&env, ContractError::UnauthorizedPlayerForGame)
         }
@@ -698,9 +698,8 @@ impl Contract {
             lives.set(other_player, other_player_lives - 1);
             scores.set(player_number, current_player_score + 1);
         } else {
-            scores.set(other_player_score, other_player + 1);
+            scores.set(other_player, other_player_score + 1);
         }
-
 
         env.storage()
             .persistent()
@@ -758,8 +757,8 @@ impl Contract {
             .persistent()
             .set(&DataKey::GameState(game_id), &GameState::Ended);
 
-        let player_1: Address = players.get(0).unwrap();
-        let player_2: Address = players.get(1).unwrap();
+        let player_1: Address = players.get(0).unwrap().unwrap();
+        let player_2: Address = players.get(1).unwrap().unwrap();
         let minebucks: Address = env
             .storage()
             .persistent()
