@@ -8,7 +8,11 @@
  * @module
  */
 
+import type * as crons from "../crons.js";
 import type * as fetchEventsAction from "../fetchEventsAction.js";
+import type * as fetchEventsAction2 from "../fetchEventsAction2.js";
+import type * as game from "../game.js";
+import type * as ledger from "../ledger.js";
 
 import type {
   ApiFromModules,
@@ -17,7 +21,11 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  crons: typeof crons;
   fetchEventsAction: typeof fetchEventsAction;
+  fetchEventsAction2: typeof fetchEventsAction2;
+  game: typeof game;
+  ledger: typeof ledger;
 }>;
 
 /**
