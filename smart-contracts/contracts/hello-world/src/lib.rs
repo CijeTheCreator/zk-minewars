@@ -1,7 +1,7 @@
 #![no_std]
 use soroban_sdk::{
     contract, contractclient, contracterror, contractevent, contractimpl, contracttype,
-    panic_with_error, token::TokenClient,  Address, Bytes, Env, Map,  Vec,
+    panic_with_error, token::TokenClient, Address, Bytes, Env, Map, Vec,
 };
 
 #[contract]
@@ -108,6 +108,20 @@ pub enum Error {
 #[contractclient(name = "VerifierClient")]
 pub trait Verifier {
     fn verify_proof(env: Env, public_inputs: Bytes, proof_bytes: Bytes) -> Result<(), Error>;
+}
+
+#[contractclient(name = "GamehubClient")]
+pub trait GameHub {
+    fn start_game(
+        game_id: Address,
+        session_id: u32,
+        player1: Address,
+        player2: Address,
+        player1_points: i128,
+        player2_points: i128,
+    );
+
+    fn end_game(session_id: u32, player1_won: bool);
 }
 
 /* EVENTS */
@@ -322,6 +336,21 @@ impl Contract {
             .persistent()
             .set(&DataKey::Board(game_id), &board);
 
+        let gamehub: Address = env
+            .storage()
+            .persistent()
+            .get(&DataKey::GameHubAddress)
+            .unwrap();
+        let player_1: Address = players.get(0).unwrap().unwrap();
+        GamehubClient::new(&env, &gamehub).start_game(
+            &env.current_contract_address(),
+            &game_id,
+            &player_1,
+            &player2,
+            &0,
+            &0,
+        );
+
         GameJoined {
             id: game_id,
             player2,
@@ -399,14 +428,20 @@ impl Contract {
             panic_with_error!(&env, ContractError::UnauthorizedAbandonWindowAction);
         }
 
-        if game_data.stake > 0 {
-            match game_state {
-                GameState::Lobby => {
-                    panic_with_error!(&env, ContractError::HowDidWeEvenGetHere);
-                }
+        let is_player_1: bool = if player_number == 0 { true } else { false };
+        let game_hub: Address = env
+            .storage()
+            .persistent()
+            .get(&DataKey::GameHubAddress)
+            .unwrap();
+        match game_state {
+            GameState::Lobby => {
+                panic_with_error!(&env, ContractError::HowDidWeEvenGetHere);
+            }
 
-                GameState::Commiting => {
-                    let other_player_address: Address = players.get(other_player).unwrap().unwrap();
+            GameState::Commiting => {
+                let other_player_address: Address = players.get(other_player).unwrap().unwrap();
+                if game_data.stake > 0 {
                     TokenClient::new(&env, &minebucks).transfer(
                         &env.current_contract_address(),
                         &player,
@@ -418,8 +453,10 @@ impl Contract {
                         &stake,
                     );
                 }
+            }
 
-                GameState::Playing => {
+            GameState::Playing => {
+                if game_data.stake > 0 {
                     let full_prize = stake * 2;
                     TokenClient::new(&env, &minebucks).transfer(
                         &env.current_contract_address(),
@@ -427,16 +464,17 @@ impl Contract {
                         &full_prize,
                     );
                 }
+            }
 
-                GameState::Abandoned => {
-                    panic_with_error!(&env, ContractError::AlreadyAbandoned);
-                }
+            GameState::Abandoned => {
+                panic_with_error!(&env, ContractError::AlreadyAbandoned);
+            }
 
-                GameState::Ended => {
-                    panic_with_error!(&env, ContractError::AlreadyEnded);
-                }
+            GameState::Ended => {
+                panic_with_error!(&env, ContractError::AlreadyEnded);
             }
         }
+        GamehubClient::new(&env, &game_hub).end_game(&game_id, &is_player_1);
         game_state = GameState::Abandoned;
         env.storage()
             .persistent()
@@ -748,18 +786,29 @@ impl Contract {
             return;
         }
 
+        /* If the proposer does not win, we can attribute a draw to the other player */
+        /* Kinda balances out the fact that the non-proposer spends a bit more gas */
+        /* Also, only player 2 can execute these parts, so assume the player down here is player2 */
+        let game_hub: Address = env.storage().persistent().get(&DataKey::GameHubAddress).unwrap();
+
         #[allow(clippy::if_same_then_else)]
         let result = if player_1_lives == 0 && player_2_lives == 0 {
+            GamehubClient::new(&env, &game_hub).end_game(&game_id, &false);
             GameResult::Draw
         } else if player_1_lives == 0 {
+            GamehubClient::new(&env, &game_hub).end_game(&game_id, &false);
             GameResult::Player2
         } else if player_2_lives == 0 {
+            GamehubClient::new(&env, &game_hub).end_game(&game_id, &true);
             GameResult::Player1
         } else if player_1_lives > player_2_lives {
+            GamehubClient::new(&env, &game_hub).end_game(&game_id, &true);
             GameResult::Player1
         } else if player_2_lives > player_1_lives {
+            GamehubClient::new(&env, &game_hub).end_game(&game_id, &false);
             GameResult::Player2
         } else {
+            GamehubClient::new(&env, &game_hub).end_game(&game_id, &false);
             GameResult::Draw
         };
 
