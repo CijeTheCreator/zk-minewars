@@ -91,6 +91,7 @@ pub enum ContractError {
     TileAlreadyRevealed = 12,
     InvalidTile = 13,
     AlreadyEnded = 14,
+    HowDidWeEvenGetHere = 15,
 }
 
 #[contracterror]
@@ -292,7 +293,9 @@ impl Contract {
             .persistent()
             .set(&DataKey::Submission(game_id), &submission);
 
-        let scores: Map<u32, u32> = Map::new(&env);
+        let mut scores: Map<u32, u32> = Map::new(&env);
+        scores.set(0, 0);
+        scores.set(1, 0);
         env.storage()
             .persistent()
             .set(&DataKey::Scores(game_id), &scores);
@@ -319,6 +322,7 @@ impl Contract {
 
     pub fn abandon(env: Env, game_id: u32, player_number: u32, player: Address) {
         player.require_auth();
+
         let turns: Map<u32, bool> = env
             .storage()
             .persistent()
@@ -338,6 +342,33 @@ impl Contract {
         if player != stored_player {
             panic_with_error!(&env, ContractError::UnauthorizedAbandonAction);
         }
+
+        let game_data: GameData = env
+            .storage()
+            .persistent()
+            .get(&DataKey::GameData(game_id))
+            .unwrap();
+        let stake: i128 = game_data.stake;
+        let minebucks: Address = env
+            .storage()
+            .persistent()
+            .get(&DataKey::MineBucksAddress)
+            .unwrap();
+
+        if game_state == GameState::Lobby {
+            TokenClient::new(&env, &minebucks).transfer(
+                &env.current_contract_address(),
+                &player,
+                &stake,
+            );
+
+            game_state = GameState::Abandoned;
+            env.storage()
+                .persistent()
+                .set(&DataKey::GameState(game_id), &game_state);
+            return;
+        }
+
         let other_player: u32 = if player_number == 1 { 0 } else { 1 };
         let other_player_turn: bool = turns.get(other_player).unwrap();
 
@@ -357,24 +388,9 @@ impl Contract {
             panic_with_error!(&env, ContractError::UnauthorizedAbandonWindowAction);
         }
 
-        let game_data: GameData = env
-            .storage()
-            .persistent()
-            .get(&DataKey::GameData(game_id))
-            .unwrap();
-        let stake: i128 = game_data.stake;
-        let minebucks: Address = env
-            .storage()
-            .persistent()
-            .get(&DataKey::MineBucksAddress)
-            .unwrap();
         match game_state {
             GameState::Lobby => {
-                TokenClient::new(&env, &minebucks).transfer(
-                    &env.current_contract_address(),
-                    &player,
-                    &stake,
-                );
+                panic_with_error!(&env, ContractError::HowDidWeEvenGetHere);
             }
 
             GameState::Commiting => {
@@ -676,12 +692,15 @@ impl Contract {
             .unwrap();
         let other_player_lives: u32 = lives.get(other_player).unwrap();
         let current_player_score: u32 = scores.get(player_number).unwrap();
+        let other_player_score: u32 = scores.get(other_player).unwrap();
 
         if previous_tile_is_mine {
             lives.set(other_player, other_player_lives - 1);
-        } else {
             scores.set(player_number, current_player_score + 1);
+        } else {
+            scores.set(other_player_score, other_player + 1);
         }
+
 
         env.storage()
             .persistent()
