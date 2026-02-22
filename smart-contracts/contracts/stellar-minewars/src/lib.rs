@@ -132,7 +132,7 @@ pub struct GameProposed {
     pub rounds: u32,
     pub stake: i128,
     pub player1: Address,
-    pub player2: Option<Address>,
+    pub player2: Address,
 }
 
 #[contractevent]
@@ -162,7 +162,7 @@ impl Contract {
         rounds: u32,
         stake: i128,
         player1: Address,
-        player2: Option<Address>,
+        player2: Address,
         time_window: u64,
     ) {
         player1.require_auth();
@@ -205,8 +205,8 @@ impl Contract {
             );
         }
 
-        let mut current_game_players: Map<u32, Option<Address>> = Map::new(&env);
-        current_game_players.set(0, Some(player1.clone()));
+        let mut current_game_players: Map<u32, Address> = Map::new(&env);
+        current_game_players.set(0, player1.clone());
         current_game_players.set(1, player2.clone());
 
         env.storage()
@@ -236,7 +236,7 @@ impl Contract {
             .persistent()
             .get(&DataKey::GameData(game_id))
             .unwrap();
-        let mut players: Map<u32, Option<Address>> = env
+        let mut players: Map<u32, Address> = env
             .storage()
             .persistent()
             .get(&DataKey::Players(game_id))
@@ -252,18 +252,16 @@ impl Contract {
             panic_with_error!(&env, ContractError::Player2AlreadyJoined);
         }
 
-        let stored_player2: Option<Address> = players.get(1).unwrap();
-        match stored_player2 {
-            Some(address) if address == player2 => {
+        if players.contains_key(1) {
+            let stored_player2: Address = players.get(1).unwrap();
+            if stored_player2 == player2 {
                 game_state = GameState::Commiting;
-            }
-            Some(_) => {
+            } else {
                 panic_with_error!(&env, ContractError::UnauthorizedPlayer2);
             }
-            None => {
-                players.set(1, Some(player2.clone()));
-                game_state = GameState::Commiting;
-            }
+        } else {
+            players.set(1, player2.clone());
+            game_state = GameState::Commiting;
         }
 
         env.storage()
@@ -341,7 +339,7 @@ impl Contract {
             .persistent()
             .get(&DataKey::GameHubAddress)
             .unwrap();
-        let player_1: Address = players.get(0).unwrap().unwrap();
+        let player_1: Address = players.get(0).unwrap();
         GamehubClient::new(&env, &gamehub).start_game(
             &env.current_contract_address(),
             &game_id,
@@ -371,12 +369,12 @@ impl Contract {
             .persistent()
             .get(&DataKey::GameState(game_id))
             .unwrap();
-        let players: Map<u32, Option<Address>> = env
+        let players: Map<u32, Address> = env
             .storage()
             .persistent()
             .get(&DataKey::Players(game_id))
             .unwrap();
-        let stored_player: Address = players.get(player_number).unwrap().unwrap();
+        let stored_player: Address = players.get(player_number).unwrap();
         if player != stored_player {
             panic_with_error!(&env, ContractError::UnauthorizedAbandonAction);
         }
@@ -440,7 +438,7 @@ impl Contract {
             }
 
             GameState::Commiting => {
-                let other_player_address: Address = players.get(other_player).unwrap().unwrap();
+                let other_player_address: Address = players.get(other_player).unwrap();
                 if game_data.stake > 0 {
                     TokenClient::new(&env, &minebucks).transfer(
                         &env.current_contract_address(),
@@ -498,12 +496,12 @@ impl Contract {
         if game_state != GameState::Commiting {
             panic_with_error!(&env, ContractError::GameNotCommiting);
         }
-        let players: Map<u32, Option<Address>> = env
+        let players: Map<u32, Address> = env
             .storage()
             .persistent()
             .get(&DataKey::Players(game_id))
             .unwrap();
-        let stored_player: Address = players.get(player_number).unwrap().unwrap();
+        let stored_player: Address = players.get(player_number).unwrap();
         if stored_player != player_address {
             panic_with_error!(&env, ContractError::UnauthroizedMineCommiter);
         }
@@ -520,44 +518,38 @@ impl Contract {
             .set(&DataKey::Mines(game_id), &mines);
 
         let other_player_number: u32 = if player_number == 0 { 1 } else { 0 };
-        let other_players_mines: Option<Bytes> = mines.get(other_player_number);
-        match other_players_mines {
-            Some(_) => {
-                /* Start the Game */
-                game_state = GameState::Playing;
-                let time_window: u64 = env
-                    .storage()
-                    .persistent()
-                    .get(&DataKey::TimeWindow(game_id))
-                    .unwrap();
-                let current_timestamp: u64 = env.ledger().timestamp();
-                let mut move_windows: Map<u32, u64> = env
-                    .storage()
-                    .persistent()
-                    .get(&DataKey::MoveWindows(game_id))
-                    .unwrap();
-                let mut turns: Map<u32, bool> = env
-                    .storage()
-                    .persistent()
-                    .get(&DataKey::Turns(game_id))
-                    .unwrap();
-                let player_1_move_window = current_timestamp + time_window;
-                move_windows.set(0, player_1_move_window);
-                turns.set(0, true);
-                turns.set(1, false);
-                env.storage()
-                    .persistent()
-                    .set(&DataKey::MoveWindows(game_id), &move_windows);
-                env.storage()
-                    .persistent()
-                    .set(&DataKey::Turns(game_id), &turns);
-                env.storage()
-                    .persistent()
-                    .set(&DataKey::GameState(game_id), &game_state);
-            }
-            None => {
-                //Do nothing
-            }
+        if mines.contains_key(other_player_number) {
+            /* Start the Game */
+            game_state = GameState::Playing;
+            let time_window: u64 = env
+                .storage()
+                .persistent()
+                .get(&DataKey::TimeWindow(game_id))
+                .unwrap();
+            let current_timestamp: u64 = env.ledger().timestamp();
+            let mut move_windows: Map<u32, u64> = env
+                .storage()
+                .persistent()
+                .get(&DataKey::MoveWindows(game_id))
+                .unwrap();
+            let mut turns: Map<u32, bool> = env
+                .storage()
+                .persistent()
+                .get(&DataKey::Turns(game_id))
+                .unwrap();
+            let player_1_move_window = current_timestamp + time_window;
+            move_windows.set(0, player_1_move_window);
+            turns.set(0, true);
+            turns.set(1, false);
+            env.storage()
+                .persistent()
+                .set(&DataKey::MoveWindows(game_id), &move_windows);
+            env.storage()
+                .persistent()
+                .set(&DataKey::Turns(game_id), &turns);
+            env.storage()
+                .persistent()
+                .set(&DataKey::GameState(game_id), &game_state);
         }
     }
 
@@ -580,12 +572,12 @@ impl Contract {
         }
 
         player_address.require_auth();
-        let players: Map<u32, Option<Address>> = env
+        let players: Map<u32, Address> = env
             .storage()
             .persistent()
             .get(&DataKey::Players(game_id))
             .unwrap();
-        let stored_player = players.get(player_number).unwrap().unwrap();
+        let stored_player = players.get(player_number).unwrap();
         if stored_player != player_address {
             panic_with_error!(&env, ContractError::UnauthorizedPlayerForGame)
         }
@@ -626,15 +618,17 @@ impl Contract {
             .get(&DataKey::VerifierAddress)
             .unwrap();
 
-
-            let commitments: Map<u32, Bytes> = env.storage().persistent().get(&DataKey::Mines(game_id)).unwrap();
-                let player_commitment = commitments.get(player_number).unwrap();
+        let commitments: Map<u32, Bytes> = env
+            .storage()
+            .persistent()
+            .get(&DataKey::Mines(game_id))
+            .unwrap();
+        let player_commitment = commitments.get(player_number).unwrap();
 
         if !(round == 0 && is_player_1_turn) {
             let previous_round_x: u32 = round_submission.get(0).unwrap();
             let previous_round_y: u32 = round_submission.get(1).unwrap();
             let previous_round_tile_revealed_value: u32 = round_submission.get(2).unwrap();
-
 
             // TODO:
             /* Prove other player hit/did not hit a mine */
@@ -644,7 +638,7 @@ impl Contract {
                 previous_round_y,
                 previous_tile_is_mine,
                 previous_round_tile_revealed_value,
-                player_commitment.clone()
+                player_commitment.clone(),
             );
             VerifierClient::new(&env, &verifier_address)
                 .try_verify_proof(&previous_round_public_inputs, &previous_round_proof)
@@ -699,7 +693,7 @@ impl Contract {
             next_round_y,
             false,
             next_round_tile_revealed_value,
-            player_commitment
+            player_commitment,
         );
         VerifierClient::new(&env, &verifier_address)
             .try_verify_proof(&next_round_public_inputs, &next_round_proof)
@@ -796,7 +790,11 @@ impl Contract {
         /* If the proposer does not win, we can attribute a draw to the other player */
         /* Kinda balances out the fact that the non-proposer spends a bit more gas */
         /* Also, only player 2 can execute these parts, so assume the player down here is player2 */
-        let game_hub: Address = env.storage().persistent().get(&DataKey::GameHubAddress).unwrap();
+        let game_hub: Address = env
+            .storage()
+            .persistent()
+            .get(&DataKey::GameHubAddress)
+            .unwrap();
 
         #[allow(clippy::if_same_then_else)]
         let result = if player_1_lives == 0 && player_2_lives == 0 {
@@ -830,8 +828,8 @@ impl Contract {
             return;
         }
 
-        let player_1: Address = players.get(0).unwrap().unwrap();
-        let player_2: Address = players.get(1).unwrap().unwrap();
+        let player_1: Address = players.get(0).unwrap();
+        let player_2: Address = players.get(1).unwrap();
         let minebucks: Address = env
             .storage()
             .persistent()
@@ -866,7 +864,14 @@ impl Contract {
 }
 
 /* Helper functions */
-fn encode_public_inputs(env: &Env, x: u32, y: u32, hit: bool, adjacents: u32, commitment: Bytes) -> Bytes {
+fn encode_public_inputs(
+    env: &Env,
+    x: u32,
+    y: u32,
+    hit: bool,
+    adjacents: u32,
+    commitment: Bytes,
+) -> Bytes {
     let mut buf = [0u8; 160]; // 5 × 32 bytes
     buf[28..32].copy_from_slice(&x.to_be_bytes());
     buf[60..64].copy_from_slice(&y.to_be_bytes());
