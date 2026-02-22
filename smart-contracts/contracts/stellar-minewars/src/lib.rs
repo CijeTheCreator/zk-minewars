@@ -868,15 +868,17 @@ impl Contract {
 /* Helper functions */
 fn encode_public_inputs(env: &Env, x: u32, y: u32, hit: bool, adjacents: u32, commitment: Bytes) -> Bytes {
     let mut buf = [0u8; 160]; // 5 × 32 bytes
-    buf[28..32].copy_from_slice(&x.to_be_bytes());          // slot 0, last 4 bytes
-    buf[60..64].copy_from_slice(&y.to_be_bytes());          // slot 1, last 4 bytes
-    buf[95] = hit as u8;                                     // slot 2, last byte
-    buf[124..128].copy_from_slice(&adjacents.to_be_bytes()); // slot 3, last 4 bytes
+    buf[28..32].copy_from_slice(&x.to_be_bytes());
+    buf[60..64].copy_from_slice(&y.to_be_bytes());
+    buf[95] = hit as u8;
+    buf[124..128].copy_from_slice(&adjacents.to_be_bytes());
 
     // slot 4: commitment (up to 32 bytes, right-aligned)
-    let commitment_slice = commitment.to_array();
-    let len = commitment_slice.len().min(32);
-    buf[(160 - len)..160].copy_from_slice(&commitment_slice[..len]); // slot 4, right-aligned
+    let len = (commitment.len() as usize).min(32);
+    let offset = 160 - len;
+    let mut commitment_slice = [0u8; 32];
+    commitment.copy_into_slice(&mut commitment_slice[..len]);
+    buf[offset..160].copy_from_slice(&commitment_slice[..len]);
 
     Bytes::from_slice(env, &buf)
 }
