@@ -1,5 +1,7 @@
 #![no_std]
 
+use core::ops::Add;
+
 use soroban_sdk::{
     contract, contractclient, contracterror, contractevent, contractimpl, contracttype,
     panic_with_error, token::TokenClient, vec, Address, Bytes, Env, Map, String, Vec,
@@ -23,6 +25,10 @@ pub enum DataKey {
     Board(u32),
     Submission(u32),
     VerifierAddress,
+    Scores(u32),
+    Lives(u32),
+    Round(u32),
+    GameResult(u32),
 }
 
 #[contracttype]
@@ -32,6 +38,15 @@ pub enum TileValue {
     Empty,
     Number(u32),
     Mine,
+}
+
+#[contracttype]
+#[derive(Clone, PartialEq)]
+pub enum GameResult {
+    Ongoing,
+    Player1,
+    Player2,
+    Draw,
 }
 
 #[contracttype]
@@ -48,6 +63,7 @@ pub enum GameState {
     Commiting,
     Playing,
     Abandoned,
+    Ended,
 }
 
 #[derive(Clone)]
@@ -73,9 +89,10 @@ pub enum ContractError {
     YourTurn = 8,
     UnauthorizedPlayerForGame = 9,
     UnauthorizedPlayerForTurn = 10,
-VerificationFailed = 11,
-TileAlreadyRevealed = 12,
-InvalidTile = 13
+    VerificationFailed = 11,
+    TileAlreadyRevealed = 12,
+    InvalidTile = 13,
+    AlreadyEnded = 14,
 }
 
 #[contracterror]
@@ -90,7 +107,7 @@ pub enum Error {
 
 #[contractclient(name = "VerifierClient")]
 pub trait Verifier {
-fn verify_proof(env: Env, public_inputs: Bytes, proof_bytes: Bytes) -> Result<(), Error>;
+    fn verify_proof(env: Env, public_inputs: Bytes, proof_bytes: Bytes) -> Result<(), Error>;
 }
 
 /* EVENTS */
@@ -332,6 +349,10 @@ pub fn abandon(env: Env, game_id: u32, player_number: u32, player: Address) {
         GameState::Abandoned => {
             panic_with_error!(&env, ContractError::AlreadyAbandoned);
         }
+
+        GameState::Ended => {
+            panic_with_error!(&env, ContractError::AlreadyEnded);
+        }
     }
     game_state = GameState::Abandoned;
     env.storage()
@@ -420,8 +441,9 @@ pub fn commit_mines(
 }
 
 #[allow(clippy::too_many_arguments)]
+#[allow(clippy::needless_return)]
 pub fn play_turn(
-    env: &Env,
+    env: Env,
     game_id: u32,
     next_round_x: u32,
     next_round_y: u32,
@@ -430,13 +452,12 @@ pub fn play_turn(
     previous_tile_is_mine: bool,
     next_round_tile_revealed_value: u32,
     previous_round_proof: Bytes,
-    next_round_proof: Bytes
+    next_round_proof: Bytes,
 ) {
     if !(0..=9).contains(&next_round_x) || !(0..=9).contains(&next_round_y) {
         panic_with_error!(&env, ContractError::InvalidTile);
     }
 
-    
     player_address.require_auth();
     let players: Map<u32, Address> = env
         .storage()
@@ -459,7 +480,6 @@ pub fn play_turn(
         panic_with_error!(&env, ContractError::UnauthorizedPlayerForTurn);
     }
 
-
     let mut round_submission: Map<u32, u32> = env
         .storage()
         .persistent()
@@ -471,9 +491,22 @@ pub fn play_turn(
 
     // TODO:
     /* Prove other player hit/did not hit a mine */
-    let verifier_address: Address = env.storage().persistent().get(&DataKey::VerifierAddress).unwrap();
-    let previous_round_public_inputs: Bytes = encode_public_inputs(env, previous_round_x, previous_round_y, previous_tile_is_mine, previous_round_tile_revealed_value);
-    VerifierClient::new(env, &verifier_address).try_verify_proof(&previous_round_public_inputs, &previous_round_proof).unwrap().unwrap();
+    let verifier_address: Address = env
+        .storage()
+        .persistent()
+        .get(&DataKey::VerifierAddress)
+        .unwrap();
+    let previous_round_public_inputs: Bytes = encode_public_inputs(
+        &env,
+        previous_round_x,
+        previous_round_y,
+        previous_tile_is_mine,
+        previous_round_tile_revealed_value,
+    );
+    VerifierClient::new(&env, &verifier_address)
+        .try_verify_proof(&previous_round_public_inputs, &previous_round_proof)
+        .unwrap()
+        .unwrap();
 
     let mut board: Vec<Vec<Tile>> = env
         .storage()
@@ -483,7 +516,7 @@ pub fn play_turn(
     let mut row = board.get(previous_round_y).unwrap();
     let mut tile = row.get(previous_round_x).unwrap();
 
-    if tile.revealed  {
+    if tile.revealed {
         panic_with_error!(&env, ContractError::TileAlreadyRevealed);
     }
 
@@ -513,7 +546,7 @@ pub fn play_turn(
     let next_row = board.get(next_round_y).unwrap();
     let next_tile = next_row.get(next_round_x).unwrap();
 
-    if next_tile.revealed  {
+    if next_tile.revealed {
         panic_with_error!(&env, ContractError::TileAlreadyRevealed);
     }
 
@@ -521,9 +554,17 @@ pub fn play_turn(
         panic_with_error!(&env, ContractError::TileAlreadyRevealed);
     }
 
-    let next_round_public_inputs: Bytes = encode_public_inputs(env, next_round_x, next_round_y, false, next_round_tile_revealed_value);
-    VerifierClient::new(env, &verifier_address).try_verify_proof(&next_round_public_inputs, &next_round_proof)
-       .unwrap().unwrap(); 
+    let next_round_public_inputs: Bytes = encode_public_inputs(
+        &env,
+        next_round_x,
+        next_round_y,
+        false,
+        next_round_tile_revealed_value,
+    );
+    VerifierClient::new(&env, &verifier_address)
+        .try_verify_proof(&next_round_public_inputs, &next_round_proof)
+        .unwrap()
+        .unwrap();
 
     /* Submit tile in the UI (new tiles in the UI) */
     round_submission.set(0, next_round_x);
@@ -533,31 +574,145 @@ pub fn play_turn(
         .persistent()
         .set(&DataKey::Submission(game_id), &round_submission);
 
-
     let other_player = if player_number == 0 { 1 } else { 0 };
     turns.set(player_number, false);
     turns.set(other_player, true);
-    env.storage().persistent().set(&DataKey::Turns(game_id), &turns);
+    env.storage()
+        .persistent()
+        .set(&DataKey::Turns(game_id), &turns);
 
     let current_timestamp: u64 = env.ledger().timestamp();
-    let time_window: u64 = env.storage().persistent().get(&DataKey::TimeWindow(game_id)).unwrap();
-    let mut move_windows: Map<u32, u64> = env.storage().persistent().get(&DataKey::MoveWindows(game_id)).unwrap();
+    let time_window: u64 = env
+        .storage()
+        .persistent()
+        .get(&DataKey::TimeWindow(game_id))
+        .unwrap();
+    let mut move_windows: Map<u32, u64> = env
+        .storage()
+        .persistent()
+        .get(&DataKey::MoveWindows(game_id))
+        .unwrap();
     move_windows.set(other_player, current_timestamp + time_window);
-    env.storage().persistent().set(&DataKey::MoveWindows(game_id), &move_windows);
+    env.storage()
+        .persistent()
+        .set(&DataKey::MoveWindows(game_id), &move_windows);
 
+    /* Update scores */
+    let mut scores: Map<u32, u32> = env
+        .storage()
+        .persistent()
+        .get(&DataKey::Scores(game_id))
+        .unwrap();
+    let mut lives: Map<u32, u32> = env
+        .storage()
+        .persistent()
+        .get(&DataKey::Lives(game_id))
+        .unwrap();
+    let other_player_score: u32 = scores.get(other_player).unwrap();
+    let other_player_lives: u32 = lives.get(other_player).unwrap();
 
-/* Update scores */
-let scores: Map<u32, u32> = env.storage().persistent().get(&DataKey::Scores(game_id)).unwrap();
-/* Check end game conditions */
+    if previous_tile_is_mine {
+        lives.set(other_player, other_player_lives - 1);
+    } else {
+        scores.set(other_player, other_player_score + 1);
+    }
+
+    env.storage()
+        .persistent()
+        .set(&DataKey::Lives(game_id), &lives);
+    env.storage()
+        .persistent()
+        .set(&DataKey::Scores(game_id), &scores);
+
+    /* Check end game conditions */
+    if player_number == 0 {
+        return;
+    }
+
+    let mut round: u32 = env
+        .storage()
+        .persistent()
+        .get(&DataKey::Round(game_id))
+        .unwrap();
+    round += 1;
+    env.storage()
+        .persistent()
+        .set(&DataKey::Round(game_id), &round);
+
+    let player_1_lives = lives.get(0).unwrap();
+    let player_2_lives = lives.get(1).unwrap();
+    let game_data: GameData = env
+        .storage()
+        .persistent()
+        .get(&DataKey::GameData(game_id))
+        .unwrap();
+
+    if !(player_1_lives == 0 || player_2_lives == 0 || game_data.rounds == round) {
+        return;
+    }
+
+    #[allow(clippy::if_same_then_else)]
+    let result = if player_1_lives == 0 && player_2_lives == 0 {
+        GameResult::Draw
+    } else if player_1_lives == 0 {
+        GameResult::Player2
+    } else if player_2_lives == 0 {
+        GameResult::Player1
+    } else if player_1_lives > player_2_lives {
+        GameResult::Player1
+    } else if player_2_lives > player_1_lives {
+        GameResult::Player2
+    } else {
+        GameResult::Draw
+    };
+
+    env.storage()
+        .persistent()
+        .set(&DataKey::GameResult(game_id), &result);
+    env.storage()
+        .persistent()
+        .set(&DataKey::GameState(game_id), &GameState::Ended);
+
+    
+
+    let player_1: Address = players.get(0).unwrap();
+    let player_2: Address = players.get(1).unwrap();
+    let minebucks: Address = env.storage().persistent().get(&DataKey::MineBucksAddress).unwrap();
+        let full_prize = &game_data.stake * 2;
+    if result == GameResult::Draw {
+        TokenClient::new(&env, &minebucks).transfer(
+            &env.current_contract_address(),
+            &player_1,
+            &game_data.stake,
+        );
+        TokenClient::new(&env, &minebucks).transfer(
+            &env.current_contract_address(),
+            &player_2,
+            &game_data.stake,
+        );
+    } else if result == GameResult::Player1 {
+        TokenClient::new(&env, &minebucks).transfer(
+            &env.current_contract_address(),
+            &player_1,
+            &full_prize,
+        );
+    } else if result == GameResult::Player2 {
+        TokenClient::new(&env, &minebucks).transfer(
+            &env.current_contract_address(),
+            &player_2,
+            &full_prize,
+        );
+    }
+
 }
 
 /* Helper functions */
 fn encode_public_inputs(env: &Env, x: u32, y: u32, hit: bool, adjacent: u32) -> Bytes {
     let mut buf = [0u8; 128]; // 4 × 32 bytes
 
-    buf[28..32].copy_from_slice(&x.to_be_bytes());        // slot 0, last 4 bytes
-    buf[60..64].copy_from_slice(&y.to_be_bytes());        // slot 1, last 4 bytes
-    buf[95] = hit as u8;                                   // slot 2, last byte
+    buf[28..32].copy_from_slice(&x.to_be_bytes()); // slot 0, last 4 bytes
+    buf[60..64].copy_from_slice(&y.to_be_bytes()); // slot 1, last 4 bytes
+    buf[95] = hit as u8; // slot 2, last byte
     buf[124..128].copy_from_slice(&adjacent.to_be_bytes()); // slot 3, last 4 bytes
 
     Bytes::from_slice(env, &buf)
