@@ -626,10 +626,15 @@ impl Contract {
             .get(&DataKey::VerifierAddress)
             .unwrap();
 
+
+            let commitments: Map<u32, Bytes> = env.storage().persistent().get(&DataKey::Mines(game_id)).unwrap();
+                let player_commitment = commitments.get(player_number).unwrap();
+
         if !(round == 0 && is_player_1_turn) {
             let previous_round_x: u32 = round_submission.get(0).unwrap();
             let previous_round_y: u32 = round_submission.get(1).unwrap();
             let previous_round_tile_revealed_value: u32 = round_submission.get(2).unwrap();
+
 
             // TODO:
             /* Prove other player hit/did not hit a mine */
@@ -639,6 +644,7 @@ impl Contract {
                 previous_round_y,
                 previous_tile_is_mine,
                 previous_round_tile_revealed_value,
+                player_commitment.clone()
             );
             VerifierClient::new(&env, &verifier_address)
                 .try_verify_proof(&previous_round_public_inputs, &previous_round_proof)
@@ -693,6 +699,7 @@ impl Contract {
             next_round_y,
             false,
             next_round_tile_revealed_value,
+            player_commitment
         );
         VerifierClient::new(&env, &verifier_address)
             .try_verify_proof(&next_round_public_inputs, &next_round_proof)
@@ -859,13 +866,17 @@ impl Contract {
 }
 
 /* Helper functions */
-fn encode_public_inputs(env: &Env, x: u32, y: u32, hit: bool, adjacent: u32) -> Bytes {
-    let mut buf = [0u8; 128]; // 4 × 32 bytes
+fn encode_public_inputs(env: &Env, x: u32, y: u32, hit: bool, adjacents: u32, commitment: Bytes) -> Bytes {
+    let mut buf = [0u8; 160]; // 5 × 32 bytes
+    buf[28..32].copy_from_slice(&x.to_be_bytes());          // slot 0, last 4 bytes
+    buf[60..64].copy_from_slice(&y.to_be_bytes());          // slot 1, last 4 bytes
+    buf[95] = hit as u8;                                     // slot 2, last byte
+    buf[124..128].copy_from_slice(&adjacents.to_be_bytes()); // slot 3, last 4 bytes
 
-    buf[28..32].copy_from_slice(&x.to_be_bytes()); // slot 0, last 4 bytes
-    buf[60..64].copy_from_slice(&y.to_be_bytes()); // slot 1, last 4 bytes
-    buf[95] = hit as u8; // slot 2, last byte
-    buf[124..128].copy_from_slice(&adjacent.to_be_bytes()); // slot 3, last 4 bytes
+    // slot 4: commitment (up to 32 bytes, right-aligned)
+    let commitment_slice = commitment.to_array();
+    let len = commitment_slice.len().min(32);
+    buf[(160 - len)..160].copy_from_slice(&commitment_slice[..len]); // slot 4, right-aligned
 
     Bytes::from_slice(env, &buf)
 }
