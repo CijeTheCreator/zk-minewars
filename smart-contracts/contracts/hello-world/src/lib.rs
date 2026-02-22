@@ -1,7 +1,7 @@
 #![no_std]
 use soroban_sdk::{
     contract, contractclient, contracterror, contractevent, contractimpl, contracttype,
-    panic_with_error, token::TokenClient, vec, Address, Bytes, Env, Map, String, Vec,
+    panic_with_error, token::TokenClient,  Address, Bytes, Env, Map,  Vec,
 };
 
 #[contract]
@@ -92,6 +92,7 @@ pub enum ContractError {
     InvalidTile = 13,
     AlreadyEnded = 14,
     HowDidWeEvenGetHere = 15,
+    InvalidStake = 16,
 }
 
 #[contracterror]
@@ -172,17 +173,23 @@ impl Contract {
             .persistent()
             .set(&DataKey::GameState(last_game_id), &GameState::Lobby);
 
-        let minebucks: Address = env
-            .storage()
-            .persistent()
-            .get(&DataKey::MineBucksAddress)
-            .unwrap();
-        TokenClient::new(&env, &minebucks).transfer_from(
-            &env.current_contract_address(),
-            &player1,
-            &env.current_contract_address(),
-            &stake,
-        );
+        if stake < 0 {
+            panic_with_error!(&env, ContractError::InvalidStake);
+        }
+
+        if stake > 0 {
+            let minebucks: Address = env
+                .storage()
+                .persistent()
+                .get(&DataKey::MineBucksAddress)
+                .unwrap();
+            TokenClient::new(&env, &minebucks).transfer_from(
+                &env.current_contract_address(),
+                &player1,
+                &env.current_contract_address(),
+                &stake,
+            );
+        }
 
         let mut current_game_players: Map<u32, Option<Address>> = Map::new(&env);
         current_game_players.set(0, Some(player1.clone()));
@@ -250,17 +257,19 @@ impl Contract {
             .set(&DataKey::GameState(game_id), &game_state);
 
         let stake: i128 = game_data.stake;
-        let minebucks: Address = env
-            .storage()
-            .persistent()
-            .get(&DataKey::MineBucksAddress)
-            .unwrap();
-        TokenClient::new(&env, &minebucks).transfer_from(
-            &env.current_contract_address(),
-            &player2,
-            &env.current_contract_address(),
-            &stake,
-        );
+        if stake > 0 {
+            let minebucks: Address = env
+                .storage()
+                .persistent()
+                .get(&DataKey::MineBucksAddress)
+                .unwrap();
+            TokenClient::new(&env, &minebucks).transfer_from(
+                &env.current_contract_address(),
+                &player2,
+                &env.current_contract_address(),
+                &stake,
+            );
+        }
 
         /* Mappings/Values per player */
         let mut move_windows: Map<u32, u64> = Map::new(&env);
@@ -356,11 +365,13 @@ impl Contract {
             .unwrap();
 
         if game_state == GameState::Lobby {
-            TokenClient::new(&env, &minebucks).transfer(
-                &env.current_contract_address(),
-                &player,
-                &stake,
-            );
+            if game_data.stake > 0 {
+                TokenClient::new(&env, &minebucks).transfer(
+                    &env.current_contract_address(),
+                    &player,
+                    &stake,
+                );
+            }
 
             game_state = GameState::Abandoned;
             env.storage()
@@ -388,40 +399,42 @@ impl Contract {
             panic_with_error!(&env, ContractError::UnauthorizedAbandonWindowAction);
         }
 
-        match game_state {
-            GameState::Lobby => {
-                panic_with_error!(&env, ContractError::HowDidWeEvenGetHere);
-            }
+        if game_data.stake > 0 {
+            match game_state {
+                GameState::Lobby => {
+                    panic_with_error!(&env, ContractError::HowDidWeEvenGetHere);
+                }
 
-            GameState::Commiting => {
-                let other_player_address: Address = players.get(other_player).unwrap().unwrap();
-                TokenClient::new(&env, &minebucks).transfer(
-                    &env.current_contract_address(),
-                    &player,
-                    &stake,
-                );
-                TokenClient::new(&env, &minebucks).transfer(
-                    &env.current_contract_address(),
-                    &other_player_address,
-                    &stake,
-                );
-            }
+                GameState::Commiting => {
+                    let other_player_address: Address = players.get(other_player).unwrap().unwrap();
+                    TokenClient::new(&env, &minebucks).transfer(
+                        &env.current_contract_address(),
+                        &player,
+                        &stake,
+                    );
+                    TokenClient::new(&env, &minebucks).transfer(
+                        &env.current_contract_address(),
+                        &other_player_address,
+                        &stake,
+                    );
+                }
 
-            GameState::Playing => {
-                let full_prize = stake * 2;
-                TokenClient::new(&env, &minebucks).transfer(
-                    &env.current_contract_address(),
-                    &player,
-                    &full_prize,
-                );
-            }
+                GameState::Playing => {
+                    let full_prize = stake * 2;
+                    TokenClient::new(&env, &minebucks).transfer(
+                        &env.current_contract_address(),
+                        &player,
+                        &full_prize,
+                    );
+                }
 
-            GameState::Abandoned => {
-                panic_with_error!(&env, ContractError::AlreadyAbandoned);
-            }
+                GameState::Abandoned => {
+                    panic_with_error!(&env, ContractError::AlreadyAbandoned);
+                }
 
-            GameState::Ended => {
-                panic_with_error!(&env, ContractError::AlreadyEnded);
+                GameState::Ended => {
+                    panic_with_error!(&env, ContractError::AlreadyEnded);
+                }
             }
         }
         game_state = GameState::Abandoned;
@@ -756,6 +769,10 @@ impl Contract {
         env.storage()
             .persistent()
             .set(&DataKey::GameState(game_id), &GameState::Ended);
+
+        if game_data.stake == 0 {
+            return;
+        }
 
         let player_1: Address = players.get(0).unwrap().unwrap();
         let player_2: Address = players.get(1).unwrap().unwrap();
