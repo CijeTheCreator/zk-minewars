@@ -725,10 +725,10 @@ impl Contract {
                 previous_round_tile_revealed_value,
                 player_commitment.clone(),
             );
-            // VerifierClient::new(&env, &verifier_address)
-            //     .try_verify_proof(&previous_round_public_inputs, &previous_round_proof)
-            //     .unwrap()
-            //     .unwrap();
+            VerifierClient::new(&env, &verifier_address)
+                .try_verify_proof(&previous_round_public_inputs, &previous_round_proof)
+                .unwrap()
+                .unwrap();
 
             let mut row = board.get(previous_round_y).unwrap();
             let mut tile = row.get(previous_round_x).unwrap();
@@ -780,10 +780,10 @@ impl Contract {
             next_round_tile_revealed_value,
             player_commitment,
         );
-        // VerifierClient::new(&env, &verifier_address)
-        //     .try_verify_proof(&next_round_public_inputs, &next_round_proof)
-        //     .unwrap()
-        //     .unwrap();
+        VerifierClient::new(&env, &verifier_address)
+            .try_verify_proof(&next_round_public_inputs, &next_round_proof)
+            .unwrap()
+            .unwrap();
 
         /* Submit tile in the UI (new tiles in the UI) */
         round_submission.set(0u32, next_round_x);
