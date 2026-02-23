@@ -2,10 +2,13 @@
 
 import { useState, useEffect } from "react";
 import Image from "next/image";
+import { useQuery } from "convex/react";
+import { api } from "@/convex/_generated/api";
 
 interface VictoryScreenProps {
   isVictory: boolean;
   stake: number;
+  sessionId: string;
   winner: string;
   loser: string;
   onPlayAgain?: () => void;
@@ -15,6 +18,7 @@ interface VictoryScreenProps {
 export function VictoryScreen({
   isVictory,
   stake,
+  sessionId,
   winner,
   loser,
   onPlayAgain,
@@ -23,6 +27,15 @@ export function VictoryScreen({
   const [playAgainPressed, setPlayAgainPressed] = useState(false);
   const [menuPressed, setMenuPressed] = useState(false);
   const [showStakeMessage, setShowStakeMessage] = useState(false);
+
+  const gameData = useQuery(
+    api.game.getGame,
+    sessionId != ""
+      ? {
+          id: Number(sessionId),
+        }
+      : "skip",
+  );
 
   useEffect(() => {
     // Delay showing stake message for dramatic effect

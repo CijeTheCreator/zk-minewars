@@ -1,3 +1,4 @@
+//game.ts
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 
@@ -130,6 +131,9 @@ export const createGame = mutation({
       result: "Ongoing",
       board: undefined,
       rounds: [],
+      current_player_turn: 0,
+      player_1_lives: args.initial_lives,
+      player_2_lives: args.initial_lives,
     });
   },
 });
@@ -143,8 +147,9 @@ export const joinGame = mutation({
     id: v.number(),
     player2: v.string(),
     board,
+    commit_move_window: v.number(),
   },
-  handler: async (ctx, { id, player2, board }) => {
+  handler: async (ctx, { id, player2, board, commit_move_window }) => {
     const game = await ctx.db
       .query("games")
       .withIndex("by_game_id", (q) => q.eq("game_id", id))
@@ -156,6 +161,7 @@ export const joinGame = mutation({
       player2,
       board,
       game_state: "Commiting",
+      commit_move_window,
     });
   },
 });
@@ -186,8 +192,8 @@ export const setBoardInitialized = mutation({
  * Moves state from Commiting → Playing.
  */
 export const startGame = mutation({
-  args: { id: v.number() },
-  handler: async (ctx, { id }) => {
+  args: { id: v.number(), current_round_move_window: v.number() },
+  handler: async (ctx, { id, current_round_move_window }) => {
     const game = await ctx.db
       .query("games")
       .withIndex("by_game_id", (q) => q.eq("game_id", id))
@@ -195,7 +201,10 @@ export const startGame = mutation({
 
     if (!game) throw new Error(`Game ${id} not found`);
 
-    await ctx.db.patch(game._id, { game_state: "Playing" });
+    await ctx.db.patch(game._id, {
+      game_state: "Playing",
+      current_round_move_window: current_round_move_window,
+    });
   },
 });
 
@@ -214,21 +223,20 @@ export const recordTurn = mutation({
     next_round_tile_revealed_value: v.number(),
     next_player_turn: v.number(),
     next_move_window: v.number(),
+    next_round: v.number(),
+    player_1_lives: v.number(),
+    player_2_lives: v.number(),
     board,
-    // current game state after the turn
-    current_lives: v.number(),
-    current_round: v.number(),
   },
   handler: async (ctx, args) => {
     const game = await ctx.db
       .query("games")
       .withIndex("by_game_id", (q) => q.eq("game_id", args.game_id))
       .unique();
-
     if (!game) throw new Error(`Game ${args.game_id} not found`);
 
     const newRound = {
-      round: args.current_round,
+      round: args.next_round,
       player_address: args.player_address,
       player_number: args.player_number,
       x: args.next_round_x,
@@ -241,8 +249,10 @@ export const recordTurn = mutation({
 
     await ctx.db.patch(game._id, {
       board: args.board,
-      current_lives: args.current_lives,
-      current_round: args.current_round,
+      current_round: args.next_round,
+      current_player_turn: args.next_player_turn,
+      player_1_lives: args.player_1_lives,
+      player_2_lives: args.player_2_lives,
       rounds: [...game.rounds, newRound],
     });
   },
@@ -329,5 +339,49 @@ export const setMinesCommited = mutation({
         ...(player === 1 ? { player1_mines: mines } : { player2_mines: mines }),
       },
     });
+  },
+});
+
+export const checkGameJoinable = query({
+  args: {
+    id: v.number(),
+    player: v.string(),
+  },
+  handler: async (ctx, { id, player }) => {
+    const game = await ctx.db
+      .query("games")
+      .withIndex("by_game_id", (q) => q.eq("game_id", id))
+      .unique();
+
+    if (!game) {
+      return { joinable: false, message: "Game does not exist yet" };
+    }
+
+    if (game.game_state !== "Lobby") {
+      return { joinable: false, message: "Game is not in a joinable state" };
+    }
+
+    if (game.player2 && game.player2.toLowerCase() !== player.toLowerCase()) {
+      return { joinable: false, message: "You are not the set player 2" };
+    }
+
+    return { joinable: true, message: "You can join this game" };
+  },
+});
+
+export const getLatestXY = query({
+  args: { game_id: v.number() },
+  handler: async (ctx, args) => {
+    const game = await ctx.db
+      .query("games")
+      .withIndex("by_game_id", (q) => q.eq("game_id", args.game_id))
+      .unique();
+
+    if (!game || game.rounds.length === 0) {
+      return { x: 0, y: 0 };
+    }
+
+    const latestRound = game.rounds[game.rounds.length - 1];
+    return { x: latestRound.x, y: latestRound.y };
   },
 });

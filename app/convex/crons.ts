@@ -5,7 +5,7 @@ const crons = cronJobs();
 
 crons.interval(
   "Sync stripe data",
-  { seconds: 5 }, // every ten seconds
+  { seconds: 5000 }, // every ten seconds
   api.fetchEventsAction2.syncEventsAction,
 );
 

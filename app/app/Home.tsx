@@ -1,72 +1,24 @@
 "use client";
-
-import { useEffect, useState } from "react";
-import { MenuScreen } from "@/components/menu-screen";
-import {
-  GameConfigScreen,
-  type GameConfig,
-} from "@/components/game-config-screen";
-
-import { fetchQuery } from "convex/nextjs";
-import { WaitingScreen } from "@/components/waiting-screen";
-import { JoinGameScreen } from "@/components/join-game-screen";
 import { CommitScreen } from "@/components/commit-screen";
-import { GameBoard } from "@/components/game-board";
-import { VictoryScreen } from "@/components/victory-screen";
 import { ConnectWalletScreen } from "@/components/connect-wallet-screen";
+import { GameBoard } from "@/components/game-board";
+import {
+  type GameConfig,
+  GameConfigScreen,
+} from "@/components/game-config-screen";
 import { JoinConfirmationScreen } from "@/components/join-confirmation-screen";
-import { ethers, formatUnits } from "ethers";
-import { CommitWaitingScreen } from "@/components/commit-waiting-screen";
-
-import {
-  isConnected,
-  getAddress,
-  signTransaction,
-  setAllowed,
-} from "@stellar/freighter-api";
-import * as StellarSdk from "@stellar/stellar-sdk";
-
-import {
-  Contract,
-  Networks,
-  TransactionBuilder,
-  Keypair,
-  rpc as StellarRpc,
-  nativeToScVal,
-  Address,
-  scValToNative,
-} from "@stellar/stellar-sdk";
-import {
-  commitMines,
-  handleTransaction,
-  saveMineData,
-} from "@/lib/soroban-utils";
+import { JoinGameScreen } from "@/components/join-game-screen";
+import { MenuScreen } from "@/components/menu-screen";
+import { VictoryScreen } from "@/components/victory-screen";
+import { WaitingScreen } from "@/components/waiting-screen";
 import { api } from "@/convex/_generated/api";
-import { Fr } from "@aztec/bb.js";
-import { useQuery } from "convex/react";
-
-type Screen =
-  | "connect-wallet"
-  | "menu"
-  | "game-config"
-  | "waiting"
-  | "join-game"
-  | "join-confirmation"
-  | "commit"
-  | "game-board"
-  | "victory"
-  | "commit-waiting";
-
-interface GameBoardData {
-  playerMines: Array<{ x: number; y: number }>;
-  opponentMines: Array<{ x: number; y: number }>;
-}
-
-interface GameResult {
-  isVictory: boolean;
-  winner: string;
-  loser: string;
-}
+import { handleTransaction, commitMines } from "@/lib/soroban-utils";
+import { setAllowed, getAddress } from "@stellar/freighter-api";
+import { nativeToScVal, Address } from "@stellar/stellar-sdk";
+import { fetchQuery } from "convex/nextjs";
+import { formatUnits } from "ethers";
+import { useState } from "react";
+import { Screen, GameBoardData, GameResult, undefined } from "./page";
 
 export default function Home() {
   const [currentScreen, setCurrentScreen] = useState<Screen>("connect-wallet");
@@ -78,7 +30,6 @@ export default function Home() {
     null,
   );
   const [gameResult, setGameResult] = useState<GameResult | null>(null);
-  const [playerNumber, setPlayerNumber] = useState<number | null>(null);
 
   const generateSessionId = () => {
     return Math.random().toString(36).substring(2, 10).toUpperCase();
@@ -120,7 +71,6 @@ export default function Home() {
       console.log("Result: ", result);
 
       setSessionId(result.events[0].eventData.id);
-      setPlayerNumber(0);
       setCurrentScreen("waiting");
     } catch (error) {
       alert((error as Error).message);
@@ -153,8 +103,6 @@ export default function Home() {
       });
       if (!game) throw new Error("Game not found");
       setJoinedSessionId(id);
-      setSessionId(id);
-      setPlayerNumber(1);
       setGameConfig({
         lives: game.initial_lives,
         rounds: game.initial_rounds,
@@ -193,34 +141,18 @@ export default function Home() {
     setCurrentScreen("join-game");
   };
 
-  const handleCommitSubmit = async (
+  const handleCommitSubmit = (
     minePositions: Array<{ x: number; y: number }>,
   ) => {
-    try {
-      console.log("Commiting mines", minePositions);
-      const nullifier = Fr.random();
-      await setAllowed();
-      const { address } = await getAddress();
-      const result = await commitMines({
-        gameId: Number(sessionId),
-        playerAddress: address,
-        playerNumber: playerNumber!,
-        minePositions,
-        nullifier,
-      });
-      console.log(result);
-
-      //Remove, no longer neeeded
-      const mockOpponentMines = generateMockMines();
-      setGameBoardData({
-        playerMines: minePositions,
-        opponentMines: mockOpponentMines,
-      });
-
-      setCurrentScreen("commit-waiting");
-    } catch (error) {
-      alert((error as Error).message);
-    }
+    console.log("Mines committed:", minePositions);
+    const handleTransaction = commitMines({});
+    // For now, generate mock opponent mines and move to game board
+    const mockOpponentMines = generateMockMines();
+    setGameBoardData({
+      playerMines: minePositions,
+      opponentMines: mockOpponentMines,
+    });
+    setCurrentScreen("game-board");
   };
 
   const generateMockMines = () => {
@@ -258,14 +190,6 @@ export default function Home() {
     setCurrentScreen("menu");
   };
 
-  function handlePlay(): void {
-    setCurrentScreen("game-board");
-  }
-
-  function handleOtherPlayerReady(): void {
-    setCurrentScreen("commit");
-  }
-
   return (
     <>
       {currentScreen === "connect-wallet" && (
@@ -284,11 +208,7 @@ export default function Home() {
         />
       )}
       {currentScreen === "waiting" && (
-        <WaitingScreen
-          sessionId={sessionId}
-          onCancel={handleWaitingCancel}
-          onOtherPlayerReady={handleOtherPlayerReady}
-        />
+        <WaitingScreen sessionId={sessionId} onCancel={handleWaitingCancel} />
       )}
       {currentScreen === "join-game" && (
         <JoinGameScreen onBack={handleBackToMenu} onJoin={handleJoinGame} />
@@ -310,21 +230,12 @@ export default function Home() {
           onCommit={handleCommitSubmit}
         />
       )}
-      {currentScreen === "commit-waiting" && (
-        <CommitWaitingScreen
-          sessionId={sessionId}
-          onPlay={handlePlay}
-          playWindow={500}
-        />
-      )}
       {currentScreen === "game-board" && gameBoardData && gameConfig && (
         <GameBoard
           playerMines={gameBoardData.playerMines}
           opponentMines={gameBoardData.opponentMines}
           playWindow={gameConfig.playWindow}
           onGameEnd={handleGameEnd}
-          sessionId={sessionId}
-          playerNumber={playerNumber!}
         />
       )}
       {currentScreen === "victory" && gameResult && (
@@ -335,7 +246,6 @@ export default function Home() {
           loser={gameResult.loser}
           onPlayAgain={handlePlayAgain}
           onBackToMenu={handleBackToMenu}
-          sessionId={sessionId}
         />
       )}
     </>

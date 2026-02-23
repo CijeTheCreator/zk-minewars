@@ -1,7 +1,7 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
-import Image from 'next/image';
+import { useState } from "react";
+import Image from "next/image";
 
 interface GameConfigScreenProps {
   onBack: () => void;
@@ -12,14 +12,18 @@ export interface GameConfig {
   lives: number;
   rounds: number;
   stake: number;
+  playWindow: number;
   playerAddress?: string;
 }
 
 export function GameConfigScreen({ onBack, onSubmit }: GameConfigScreenProps) {
   const [lives, setLives] = useState(3);
   const [rounds, setRounds] = useState(10);
-  const [stake, setStake] = useState('');
-  const [playerAddress, setPlayerAddress] = useState('');
+  const [stake, setStake] = useState("0");
+  const [playWindow, setPlayWindow] = useState(30);
+  const [playerAddress, setPlayerAddress] = useState(
+    "GAA4632SKX2T3ZYPFMAFJEJF5VV63BABRVTQL2ADGIDCKM7FWICSBWNR",
+  );
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [submitPressed, setSubmitPressed] = useState(false);
   const [backPressed, setBackPressed] = useState(false);
@@ -40,6 +44,7 @@ export function GameConfigScreen({ onBack, onSubmit }: GameConfigScreenProps) {
         lives,
         rounds,
         stake: stake ? parseInt(stake) : 0,
+        playWindow,
         playerAddress: playerAddress || undefined,
       });
     }, 150);
@@ -78,7 +83,7 @@ export function GameConfigScreen({ onBack, onSubmit }: GameConfigScreenProps) {
         <button
           onClick={handleBackClick}
           className={`absolute top-6 left-6 transition-transform duration-150 ${
-            backPressed ? 'scale-95' : 'scale-100'
+            backPressed ? "scale-95" : "scale-100"
           }`}
         >
           <Image
@@ -91,17 +96,24 @@ export function GameConfigScreen({ onBack, onSubmit }: GameConfigScreenProps) {
         </button>
 
         {/* Title */}
-        <h1 className="text-4xl md:text-6xl font-bold text-white text-center mb-12 drop-shadow-lg" style={{ textShadow: '4px 4px 0px rgba(0,0,0,0.5)' }}>
+        <h1
+          className="text-4xl md:text-6xl font-bold text-white text-center mb-8 drop-shadow-lg flex-shrink-0"
+          style={{ textShadow: "4px 4px 0px rgba(0,0,0,0.5)" }}
+        >
           GAME CONFIG
         </h1>
 
-        {/* Config container */}
-        <div className="flex flex-col gap-8 items-center max-w-md w-full">
+        {/* Config container - Scrollable */}
+        <div className="flex flex-col gap-6 items-center max-w-md w-full overflow-y-auto max-h-[calc(100vh-280px)] px-2 pb-4">
           {/* Lives Selector */}
-          <div className="bg-black bg-opacity-40 rounded-lg p-6 w-full border-4 border-yellow-400">
-            <h2 className="text-2xl font-bold text-white text-center mb-4 drop-shadow">LIVES</h2>
+          <div className="bg-black bg-opacity-40 rounded-lg p-4 w-full border-4 border-yellow-400 flex-shrink-0">
+            <h2 className="text-xl font-bold text-white text-center mb-3 drop-shadow">
+              LIVES
+            </h2>
             {lives === 1 && (
-              <p className="text-sm text-yellow-300 text-center mb-3 italic">Classic Minesweeper Experience</p>
+              <p className="text-sm text-yellow-300 text-center mb-3 italic">
+                Classic Minesweeper Experience
+              </p>
             )}
             <div className="flex items-center justify-center gap-4">
               <button
@@ -110,7 +122,9 @@ export function GameConfigScreen({ onBack, onSubmit }: GameConfigScreenProps) {
               >
                 −
               </button>
-              <span className="text-5xl font-bold text-white w-16 text-center">{lives}</span>
+              <span className="text-5xl font-bold text-white w-16 text-center">
+                {lives}
+              </span>
               <button
                 onClick={incrementLives}
                 className="bg-yellow-400 hover:bg-yellow-500 text-black font-bold w-12 h-12 rounded-lg transition-colors"
@@ -121,8 +135,10 @@ export function GameConfigScreen({ onBack, onSubmit }: GameConfigScreenProps) {
           </div>
 
           {/* Rounds Selector */}
-          <div className="bg-black bg-opacity-40 rounded-lg p-6 w-full border-4 border-blue-400">
-            <h2 className="text-2xl font-bold text-white text-center mb-4 drop-shadow">ROUNDS</h2>
+          <div className="bg-black bg-opacity-40 rounded-lg p-4 w-full border-4 border-blue-400 flex-shrink-0">
+            <h2 className="text-xl font-bold text-white text-center mb-3 drop-shadow">
+              ROUNDS
+            </h2>
             <div className="flex items-center justify-center gap-4">
               <button
                 onClick={decrementRounds}
@@ -130,7 +146,9 @@ export function GameConfigScreen({ onBack, onSubmit }: GameConfigScreenProps) {
               >
                 −
               </button>
-              <span className="text-5xl font-bold text-white w-16 text-center">{rounds}</span>
+              <span className="text-5xl font-bold text-white w-16 text-center">
+                {rounds}
+              </span>
               <button
                 onClick={incrementRounds}
                 className="bg-blue-400 hover:bg-blue-500 text-white font-bold w-12 h-12 rounded-lg transition-colors"
@@ -141,8 +159,10 @@ export function GameConfigScreen({ onBack, onSubmit }: GameConfigScreenProps) {
           </div>
 
           {/* Stake Input */}
-          <div className="bg-black bg-opacity-40 rounded-lg p-6 w-full border-4 border-purple-400">
-            <h2 className="text-2xl font-bold text-white text-center mb-4 drop-shadow">STAKE</h2>
+          <div className="bg-black bg-opacity-40 rounded-lg p-4 w-full border-4 border-purple-400 flex-shrink-0">
+            <h2 className="text-xl font-bold text-white text-center mb-3 drop-shadow">
+              STAKE
+            </h2>
             <input
               type="number"
               value={stake}
@@ -152,40 +172,74 @@ export function GameConfigScreen({ onBack, onSubmit }: GameConfigScreenProps) {
             />
           </div>
 
+          {/* Player Address */}
+          <div className="bg-black bg-opacity-40 rounded-lg p-4 w-full border-4 border-pink-400 flex-shrink-0">
+            <h2 className="text-xl font-bold text-white text-center mb-3 drop-shadow">
+              PLAYER ADDRESS
+            </h2>
+            <p className="text-xs text-gray-300 text-center mb-3">
+              Your Stellar Address
+            </p>
+            <input
+              type="text"
+              value={playerAddress}
+              onChange={(e) => setPlayerAddress(e.target.value.toUpperCase())}
+              placeholder="Stellar Address (56 chars)"
+              maxLength={56}
+              className="w-full px-3 py-2 text-center text-xs font-mono rounded-lg bg-white bg-opacity-90 text-black placeholder-gray-500 focus:outline-none focus:ring-4 focus:ring-pink-400"
+            />
+            {playerAddress && (
+              <p className="text-xs text-pink-300 text-center mt-2">
+                {playerAddress.length}/56 characters
+              </p>
+            )}
+          </div>
+
           {/* Advanced Section Toggle */}
           <button
             onClick={() => setShowAdvanced(!showAdvanced)}
             className="text-white text-sm font-bold hover:text-yellow-300 transition-colors underline"
           >
-            {showAdvanced ? '▼ ADVANCED' : '▶ ADVANCED'}
+            {showAdvanced ? "▼ ADVANCED" : "▶ ADVANCED"}
           </button>
 
           {/* Advanced Section */}
           {showAdvanced && (
-            <div className="bg-black bg-opacity-40 rounded-lg p-6 w-full border-4 border-pink-400">
-              <h2 className="text-2xl font-bold text-white text-center mb-4 drop-shadow">PLAYER ADDRESS</h2>
-              <p className="text-xs text-gray-300 text-center mb-3">Optional: Make this a private game</p>
-              <input
-                type="text"
-                value={playerAddress}
-                onChange={(e) => setPlayerAddress(e.target.value.toUpperCase())}
-                placeholder="Stellar Address (56 chars)"
-                maxLength={56}
-                className="w-full px-3 py-2 text-center text-xs font-mono rounded-lg bg-white bg-opacity-90 text-black placeholder-gray-500 focus:outline-none focus:ring-4 focus:ring-pink-400"
-              />
-              {playerAddress && (
-                <p className="text-xs text-pink-300 text-center mt-2">
-                  {playerAddress.length}/56 characters
+            <div className="space-y-4 w-full">
+              {/* Play Window Selector */}
+              <div className="bg-black bg-opacity-40 rounded-lg p-4 w-full border-4 border-green-400 flex-shrink-0">
+                <h2 className="text-xl font-bold text-white text-center mb-3 drop-shadow">
+                  PLAY WINDOW
+                </h2>
+                <p className="text-xs text-gray-300 text-center mb-3">
+                  Seconds per turn
                 </p>
-              )}
+                <div className="flex items-center justify-center gap-4">
+                  <button
+                    onClick={() => setPlayWindow(Math.max(10, playWindow - 5))}
+                    className="bg-green-400 hover:bg-green-500 text-black font-bold w-12 h-12 rounded-lg transition-colors"
+                  >
+                    −
+                  </button>
+                  <span className="text-5xl font-bold text-white w-24 text-center">
+                    {playWindow}s
+                  </span>
+                  <button
+                    onClick={() => setPlayWindow(Math.min(300, playWindow + 5))}
+                    className="bg-green-400 hover:bg-green-500 text-black font-bold w-12 h-12 rounded-lg transition-colors"
+                  >
+                    +
+                  </button>
+                </div>
+              </div>
             </div>
           )}
 
           {/* Submit Button */}
           <button
             onClick={handleSubmitClick}
-            className={`transition-transform duration-150 mt-4 ${
-              submitPressed ? 'scale-95' : 'scale-100 hover:scale-105'
+            className={`transition-transform duration-150 mt-2 flex-shrink-0 ${
+              submitPressed ? "scale-95" : "scale-100 hover:scale-105"
             }`}
           >
             <Image

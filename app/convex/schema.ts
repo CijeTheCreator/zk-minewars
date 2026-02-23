@@ -1,3 +1,4 @@
+// scheme.ts
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 
@@ -23,6 +24,10 @@ export default defineSchema({
         player_2_payout: v.string(), // BigInt as string
       }),
     ),
+    current_player_turn: v.number(), // defaults to 0 (player 1) until first TurnPlayed
+    player_1_lives: v.number(),
+    player_2_lives: v.number(),
+    current_round: v.number(), // you already have this, just confirming it stays
 
     mines_commited: v.optional(
       v.object({
@@ -40,7 +45,6 @@ export default defineSchema({
 
     // Mutable state
     current_lives: v.number(),
-    current_round: v.number(),
 
     game_state: v.union(
       v.literal("Lobby"),
@@ -58,6 +62,8 @@ export default defineSchema({
 
     // 9x9 board stored as structured JSON
     board: v.optional(v.array(v.array(tile))),
+    current_round_move_window: v.optional(v.number()),
+    commit_move_window: v.optional(v.number()),
 
     // Append-only log of turns played (TurnPlayed events)
     rounds: v.array(

@@ -12,6 +12,7 @@ import type * as crons from "../crons.js";
 import type * as fetchEventsAction from "../fetchEventsAction.js";
 import type * as fetchEventsAction2 from "../fetchEventsAction2.js";
 import type * as game from "../game.js";
+import type * as http from "../http.js";
 import type * as ledger from "../ledger.js";
 
 import type {
@@ -25,6 +26,7 @@ declare const fullApi: ApiFromModules<{
   fetchEventsAction: typeof fetchEventsAction;
   fetchEventsAction2: typeof fetchEventsAction2;
   game: typeof game;
+  http: typeof http;
   ledger: typeof ledger;
 }>;
 

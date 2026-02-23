@@ -1,8 +1,21 @@
-import { action } from "./_generated/server";
+"use node";
+import { action, httpAction } from "./_generated/server";
 import { v } from "convex/values";
 import { api } from "./_generated/api";
 import { Server } from "@stellar/stellar-sdk/rpc";
 import { xdr, scValToNative } from "@stellar/stellar-sdk";
+
+/**
+ * Soroban enums come back from scValToNative as single-element arrays, e.g. ["Player1"].
+ * This unwraps them to the plain string.
+ */
+function parseEnumVariant(raw: unknown): string {
+  if (Array.isArray(raw) && raw.length === 1 && typeof raw[0] === "string") {
+    return raw[0];
+  }
+  if (typeof raw === "string") return raw; // already a string, passthrough
+  throw new Error(`Unexpected enum shape: ${JSON.stringify(raw)}`);
+}
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -56,7 +69,7 @@ export const syncEventsAction = action({
   handler: async (ctx, {}) => {
     const server = new Server("https://soroban-testnet.stellar.org");
     const contractId =
-      "CC2UFRAFXDNF6X7JU3VBIMK4S4XO4EDHDXJINUMD7HVKDHP5SKJQKNOT";
+      "CDUJRT6DEQWFSQPZPJHEHPDSFKEQWJN6FYBVVTLEZIRT22OHGANXN2AY";
     const startLedger = await ctx.runQuery(api.ledger.getLastLedger);
 
     const { events, latestLedger } = await server.getEvents({
@@ -116,11 +129,13 @@ export const syncEventsAction = action({
               id: number;
               player2: string;
               board: RawBoard;
+              commit_move_window: bigint;
             };
             await ctx.runMutation(api.game.joinGame, {
               id: v.id,
               player2: v.player2,
               board: parseBoard(v.board),
+              commit_move_window: Number(v.commit_move_window),
             });
             console.log(`[game_joined] Game ${v.id} joined by ${v.player2}`);
             break;
@@ -139,8 +154,14 @@ export const syncEventsAction = action({
 
           // ── game_started ───────────────────────────────────────────────────
           case "game_started": {
-            const v = value as { id: number };
-            await ctx.runMutation(api.game.startGame, { id: v.id });
+            const v = value as {
+              id: number;
+              current_round_move_window: bigint;
+            };
+            await ctx.runMutation(api.game.startGame, {
+              id: v.id,
+              current_round_move_window: Number(v.current_round_move_window),
+            });
             console.log(`[game_started] Game ${v.id} started`);
             break;
           }
@@ -157,11 +178,10 @@ export const syncEventsAction = action({
               next_round_tile_revealed_value: number;
               next_player_turn: number;
               next_move_window: bigint;
+              next_round: number;
+              player_1_lives: number;
+              player_2_lives: number;
               board: RawBoard;
-              // These may or may not be present depending on your contract;
-              // provide safe defaults if absent.
-              current_lives?: number;
-              current_round?: number;
             };
             await ctx.runMutation(api.game.recordTurn, {
               game_id: v.game_id,
@@ -173,9 +193,10 @@ export const syncEventsAction = action({
               next_round_tile_revealed_value: v.next_round_tile_revealed_value,
               next_player_turn: v.next_player_turn,
               next_move_window: Number(v.next_move_window),
+              next_round: v.next_round,
+              player_1_lives: v.player_1_lives,
+              player_2_lives: v.player_2_lives,
               board: parseBoard(v.board),
-              current_lives: v.current_lives ?? 0,
-              current_round: v.current_round ?? 0,
             });
             console.log(`[turn_played] Turn recorded for game ${v.game_id}`);
             break;
@@ -191,17 +212,36 @@ export const syncEventsAction = action({
 
           // ── game_ended ─────────────────────────────────────────────────────
           case "game_ended": {
+            const v = value as { id: number; result: unknown };
+            const result = parseEnumVariant(v.result) as
+              | "Ongoing"
+              | "Player1"
+              | "Player2"
+              | "Draw";
+            await ctx.runMutation(api.game.endGame, { id: v.id, result });
+            console.log(
+              `[game_ended] Game ${v.id} ended with result: ${result}`,
+            );
+            break;
+          }
+
+          case "winner_awarded": {
             const v = value as {
               id: number;
-              result: "Ongoing" | "Player1" | "Player2" | "Draw";
+              result: unknown;
+              player_1: bigint;
+              player_2: bigint;
             };
-            await ctx.runMutation(api.game.endGame, {
+            const result = parseEnumVariant(v.result) as
+              | "Ongoing"
+              | "Player1"
+              | "Player2"
+              | "Draw";
+            await ctx.runMutation(api.game.setWinnerAwarded, {
               id: v.id,
-              result: v.result,
+              player_1_payout: v.player_1.toString(),
+              player_2_payout: v.player_2.toString(),
             });
-            console.log(
-              `[game_ended] Game ${v.id} ended with result: ${v.result}`,
-            );
             break;
           }
 
@@ -221,10 +261,17 @@ export const syncEventsAction = action({
           }
 
           case "mines_commited": {
-            const v = value as { id: number; mines: string; player: number };
+            const v = value as {
+              id: number;
+              mines: Buffer | string;
+              player: number;
+            };
+            const minesHex = Buffer.isBuffer(v.mines)
+              ? v.mines.toString("hex")
+              : v.mines;
             await ctx.runMutation(api.game.setMinesCommited, {
               id: v.id,
-              mines: v.mines,
+              mines: minesHex,
               player: v.player,
             });
             break;

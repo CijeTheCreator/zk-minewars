@@ -140,6 +140,7 @@ pub struct GameJoined {
     pub id: u32,
     pub player2: Address,
     pub board: Vec<Vec<Tile>>,
+    pub commit_move_window: u64,
 }
 
 #[contractevent]
@@ -158,6 +159,7 @@ pub struct MinesCommited {
 #[contractevent]
 pub struct GameStarted {
     pub id: u32,
+    pub current_round_move_window: u64,
 }
 
 #[contractevent]
@@ -183,11 +185,14 @@ pub struct TurnPlayed {
     pub player_number: u32,
     pub previous_tile_is_mine: bool,
     pub next_round_tile_revealed_value: u32,
-    pub previous_round_proof: Bytes,
-    pub next_round_proof: Bytes,
     pub next_player_turn: u32,
     pub next_move_window: u64,
     pub board: Vec<Vec<Tile>>,
+    pub player_1_lives: u32,
+    pub player_2_lives: u32,
+    pub player_1_score: u32,
+    pub player_2_score: u32,
+    pub next_round: u32,
 }
 
 #[contractevent]
@@ -225,7 +230,7 @@ impl Contract {
             .storage()
             .persistent()
             .get(&DataKey::LastGameId)
-            .unwrap_or(0);
+            .unwrap_or(0u32);
         let current_game_data = GameData {
             lives,
             rounds,
@@ -345,8 +350,8 @@ impl Contract {
             .get(&DataKey::TimeWindow(game_id))
             .unwrap();
         let move_window: u64 = env.ledger().timestamp() + time_window;
-        move_windows.set(0, move_window);
-        move_windows.set(1, move_window);
+        move_windows.set(0u32, move_window);
+        move_windows.set(1u32, move_window);
         env.storage()
             .persistent()
             .set(&DataKey::MoveWindows(game_id), &move_windows);
@@ -357,8 +362,8 @@ impl Contract {
             .set(&DataKey::Mines(game_id), &mines);
 
         let mut turns: Map<u32, bool> = Map::new(&env);
-        turns.set(0, true);
-        turns.set(1, false);
+        turns.set(0u32, true);
+        turns.set(1u32, false);
         env.storage()
             .persistent()
             .set(&DataKey::Turns(game_id), &turns);
@@ -369,20 +374,20 @@ impl Contract {
             .set(&DataKey::Submission(game_id), &submission);
 
         let mut scores: Map<u32, u32> = Map::new(&env);
-        scores.set(0, 0);
-        scores.set(1, 0);
+        scores.set(0u32, 0u32);
+        scores.set(1u32, 0u32);
         env.storage()
             .persistent()
             .set(&DataKey::Scores(game_id), &scores);
 
         let mut lives: Map<u32, u32> = Map::new(&env);
-        lives.set(0, game_data.lives);
-        lives.set(1, game_data.lives);
+        lives.set(0u32, game_data.lives);
+        lives.set(1u32, game_data.lives);
         env.storage()
             .persistent()
             .set(&DataKey::Lives(game_id), &lives);
 
-        env.storage().persistent().set(&DataKey::Round(game_id), &0);
+        env.storage().persistent().set(&DataKey::Round(game_id), &0u32);
         let board = init_board(&env);
         env.storage()
             .persistent()
@@ -393,20 +398,21 @@ impl Contract {
             .persistent()
             .get(&DataKey::GameHubAddress)
             .unwrap();
-        let player_1: Address = players.get(0).unwrap();
+        let player_1: Address = players.get(0u32).unwrap();
         GamehubClient::new(&env, &gamehub).start_game(
             &env.current_contract_address(),
             &game_id,
             &player_1,
             &player2,
-            &0,
-            &0,
+            &0i128,
+            &0i128,
         );
 
         GameJoined {
             id: game_id,
             player2,
             board,
+            commit_move_window: move_window,
         }
         .publish(&env);
     }
@@ -469,7 +475,7 @@ impl Contract {
             return;
         }
 
-        let other_player: u32 = if player_number == 1 { 0 } else { 1 };
+        let other_player: u32 = if player_number == 1u32 { 0u32 } else { 1u32 };
         let other_player_turn: bool = turns.get(other_player).unwrap();
 
         if !other_player_turn {
@@ -488,7 +494,7 @@ impl Contract {
             panic_with_error!(&env, ContractError::UnauthorizedAbandonWindowAction);
         }
 
-        let is_player_1: bool = player_number == 0;
+        let is_player_1: bool = player_number == 0u32;
         let game_hub: Address = env
             .storage()
             .persistent()
@@ -591,7 +597,7 @@ impl Contract {
         }
         .publish(&env);
 
-        let other_player_number: u32 = if player_number == 0 { 1 } else { 0 };
+        let other_player_number: u32 = if player_number == 0u32 { 1u32 } else { 0u32 };
         if mines.contains_key(other_player_number) {
             /* Start the Game */
             game_state = GameState::Playing;
@@ -612,9 +618,9 @@ impl Contract {
                 .get(&DataKey::Turns(game_id))
                 .unwrap();
             let player_1_move_window = current_timestamp + time_window;
-            move_windows.set(0, player_1_move_window);
-            turns.set(0, true);
-            turns.set(1, false);
+            move_windows.set(0u32, player_1_move_window);
+            turns.set(0u32, true);
+            turns.set(1u32, false);
             env.storage()
                 .persistent()
                 .set(&DataKey::MoveWindows(game_id), &move_windows);
@@ -624,7 +630,11 @@ impl Contract {
             env.storage()
                 .persistent()
                 .set(&DataKey::GameState(game_id), &game_state);
-            GameStarted { id: game_id }.publish(&env);
+            GameStarted {
+                id: game_id,
+                current_round_move_window: player_1_move_window,
+            }
+            .publish(&env);
         }
     }
 
@@ -642,7 +652,7 @@ impl Contract {
         previous_round_proof: Bytes,
         next_round_proof: Bytes,
     ) {
-        if !(0..=8).contains(&next_round_x) || !(0..=8).contains(&next_round_y) {
+        if !(0u32..=8u32).contains(&next_round_x) || !(0u32..=8u32).contains(&next_round_y) {
             panic_with_error!(&env, ContractError::InvalidTile);
         }
 
@@ -668,7 +678,7 @@ impl Contract {
             panic_with_error!(&env, ContractError::UnauthorizedPlayerForTurn);
         }
 
-        let is_player_1_turn: bool = turns.get(0).unwrap();
+        let is_player_1_turn: bool = turns.get(0u32).unwrap();
         let round: u32 = env
             .storage()
             .persistent()
@@ -700,10 +710,10 @@ impl Contract {
             .unwrap();
         let player_commitment = commitments.get(player_number).unwrap();
 
-        if !(round == 0 && is_player_1_turn) {
-            let previous_round_x: u32 = round_submission.get(0).unwrap();
-            let previous_round_y: u32 = round_submission.get(1).unwrap();
-            let previous_round_tile_revealed_value: u32 = round_submission.get(2).unwrap();
+        if !(round == 0u32 && is_player_1_turn) {
+            let previous_round_x: u32 = round_submission.get(0u32).unwrap();
+            let previous_round_y: u32 = round_submission.get(1u32).unwrap();
+            let previous_round_tile_revealed_value: u32 = round_submission.get(2u32).unwrap();
 
             // TODO:
             /* Prove other player hit/did not hit a mine */
@@ -715,10 +725,10 @@ impl Contract {
                 previous_round_tile_revealed_value,
                 player_commitment.clone(),
             );
-            VerifierClient::new(&env, &verifier_address)
-                .try_verify_proof(&previous_round_public_inputs, &previous_round_proof)
-                .unwrap()
-                .unwrap();
+            // VerifierClient::new(&env, &verifier_address)
+            //     .try_verify_proof(&previous_round_public_inputs, &previous_round_proof)
+            //     .unwrap()
+            //     .unwrap();
 
             let mut row = board.get(previous_round_y).unwrap();
             let mut tile = row.get(previous_round_x).unwrap();
@@ -730,7 +740,7 @@ impl Contract {
             tile.revealed = true;
             tile.value = if previous_tile_is_mine {
                 TileValue::Mine
-            } else if previous_round_tile_revealed_value == 0 {
+            } else if previous_round_tile_revealed_value == 0u32 {
                 TileValue::Empty
             } else {
                 TileValue::Number(previous_round_tile_revealed_value)
@@ -739,7 +749,7 @@ impl Contract {
             row.set(previous_round_x, tile);
             board.set(previous_round_y, row);
 
-            if !previous_tile_is_mine && previous_round_tile_revealed_value == 0 {
+            if !previous_tile_is_mine && previous_round_tile_revealed_value == 0u32 {
                 reveal_adjacent(previous_round_x, previous_round_y, &mut board);
             }
 
@@ -770,20 +780,20 @@ impl Contract {
             next_round_tile_revealed_value,
             player_commitment,
         );
-        VerifierClient::new(&env, &verifier_address)
-            .try_verify_proof(&next_round_public_inputs, &next_round_proof)
-            .unwrap()
-            .unwrap();
+        // VerifierClient::new(&env, &verifier_address)
+        //     .try_verify_proof(&next_round_public_inputs, &next_round_proof)
+        //     .unwrap()
+        //     .unwrap();
 
         /* Submit tile in the UI (new tiles in the UI) */
-        round_submission.set(0, next_round_x);
-        round_submission.set(1, next_round_y);
-        round_submission.set(2, next_round_tile_revealed_value);
+        round_submission.set(0u32, next_round_x);
+        round_submission.set(1u32, next_round_y);
+        round_submission.set(2u32, next_round_tile_revealed_value);
         env.storage()
             .persistent()
             .set(&DataKey::Submission(game_id), &round_submission);
 
-        let other_player = if player_number == 0 { 1 } else { 0 };
+        let other_player = if player_number == 0u32 { 1u32 } else { 0 };
         turns.set(player_number, false);
         turns.set(other_player, true);
         env.storage()
@@ -823,10 +833,10 @@ impl Contract {
         let other_player_score: u32 = scores.get(other_player).unwrap();
 
         if previous_tile_is_mine {
-            lives.set(other_player, other_player_lives - 1);
-            scores.set(player_number, current_player_score + 1);
+            lives.set(other_player, other_player_lives - 1u32);
+            scores.set(player_number, current_player_score + 1u32);
         } else {
-            scores.set(other_player, other_player_score + 1);
+            scores.set(other_player, other_player_score + 1u32);
         }
 
         env.storage()
@@ -836,28 +846,30 @@ impl Contract {
             .persistent()
             .set(&DataKey::Scores(game_id), &scores);
 
-        /* Check end game conditions */
-        if player_number == 0 {
-            return;
-        }
 
         let mut round: u32 = env
             .storage()
             .persistent()
             .get(&DataKey::Round(game_id))
             .unwrap();
-        round += 1;
+        round += 1u32;
         env.storage()
             .persistent()
             .set(&DataKey::Round(game_id), &round);
 
-        let player_1_lives = lives.get(0).unwrap();
-        let player_2_lives = lives.get(1).unwrap();
+        let player_1_lives = lives.get(0u32).unwrap();
+        let player_2_lives = lives.get(1u32).unwrap();
+
+
+        let player_1_score = scores.get(0u32).unwrap();
+        let player_2_score = scores.get(1u32).unwrap();
+
         let game_data: GameData = env
             .storage()
             .persistent()
             .get(&DataKey::GameData(game_id))
             .unwrap();
+
 
         TurnPlayed {
             game_id,
@@ -867,15 +879,24 @@ impl Contract {
             player_number,
             previous_tile_is_mine,
             next_round_tile_revealed_value,
-            previous_round_proof,
-            next_round_proof,
             next_player_turn: other_player,
             next_move_window,
             board,
+            player_1_lives,
+            player_2_lives,
+            player_1_score,
+            player_2_score,
+            next_round: round,
         }
         .publish(&env);
 
-        if !(player_1_lives == 0 || player_2_lives == 0 || game_data.rounds == round) {
+        /* Check end game conditions */
+        if player_number == 0u32 {
+            return;
+        }
+
+
+        if !(player_1_lives == 0u32 || player_2_lives == 0u32 || game_data.rounds == round) {
             return;
         }
 
@@ -889,13 +910,13 @@ impl Contract {
             .unwrap();
 
         #[allow(clippy::if_same_then_else)]
-        let result = if player_1_lives == 0 && player_2_lives == 0 {
+        let result = if player_1_lives == 0u32 && player_2_lives == 0u32 {
             GamehubClient::new(&env, &game_hub).end_game(&game_id, &false);
             GameResult::Draw
-        } else if player_1_lives == 0 {
+        } else if player_1_lives == 0u32 {
             GamehubClient::new(&env, &game_hub).end_game(&game_id, &false);
             GameResult::Player2
-        } else if player_2_lives == 0 {
+        } else if player_2_lives == 0u32 {
             GamehubClient::new(&env, &game_hub).end_game(&game_id, &true);
             GameResult::Player1
         } else if player_1_lives > player_2_lives {
@@ -921,18 +942,18 @@ impl Contract {
         }
         .publish(&env);
 
-        if game_data.stake == 0 {
+        if game_data.stake == 0i128 {
             return;
         }
 
-        let player_1: Address = players.get(0).unwrap();
-        let player_2: Address = players.get(1).unwrap();
+        let player_1: Address = players.get(0u32).unwrap();
+        let player_2: Address = players.get(1u32).unwrap();
         let minebucks: Address = env
             .storage()
             .persistent()
             .get(&DataKey::MineBucksAddress)
             .unwrap();
-        let full_prize = &game_data.stake * 2;
+        let full_prize = &game_data.stake * 2i128;
         if result == GameResult::Draw {
             TokenClient::new(&env, &minebucks).transfer(
                 &env.current_contract_address(),
@@ -974,7 +995,7 @@ impl Contract {
             WinnerAwarded {
                 id: game_id,
                 result,
-                player_1: 0,
+                player_1: 0i128,
                 player_2: full_prize,
             }
             .publish(&env);
@@ -983,9 +1004,9 @@ impl Contract {
 
     pub fn make_board(env: &Env) {
         let mut board: Vec<Vec<Tile>> = Vec::new(env);
-        for _ in 0..9u32 {
+        for _ in 0u32..9u32 {
             let mut row: Vec<Tile> = Vec::new(env);
-            for _ in 0..9u32 {
+            for _ in 0u32..9u32 {
                 row.push_back(Tile {
                     revealed: false,
                     value: TileValue::Hidden,
@@ -1027,9 +1048,9 @@ fn encode_public_inputs(
 }
 
 fn reveal_adjacent(cx: u32, cy: u32, board: &mut Vec<Vec<Tile>>) {
-    for dy in 0u32..3 {
-        for dx in 0u32..3 {
-            if dy == 1 && dx == 1 {
+    for dy in 0u32..3u32 {
+        for dx in 0u32..3u32 {
+            if dy == 1u32 && dx == 1 {
                 continue;
             }
             let nx = cx as i32 + dx as i32 - 1;

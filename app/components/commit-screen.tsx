@@ -1,9 +1,11 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
-import Image from 'next/image';
-import { useBoard } from '@/hooks/use-board';
-import { TileMap } from '@/components/tile-map';
+import circuitData from "@/lib/circuits.json";
+
+import { useState } from "react";
+import Image from "next/image";
+import { useBoard } from "@/hooks/use-board";
+import { TileMap } from "@/components/tile-map";
 
 interface CommitScreenProps {
   onBack: () => void;
@@ -32,12 +34,14 @@ export function CommitScreen({ onBack, onCommit }: CommitScreenProps) {
   };
 
   const handleCommitClick = () => {
-    if (mineCount === MAX_MINES) {
-      setCommitPressed(true);
-      setTimeout(() => {
-        setCommitPressed(false);
+    try {
+      if (mineCount === MAX_MINES) {
+        setCommitPressed(true);
         onCommit(minedTiles);
-      }, 150);
+        setCommitPressed(false);
+      }
+    } catch (error) {
+      throw error;
     }
   };
 
@@ -57,8 +61,9 @@ export function CommitScreen({ onBack, onCommit }: CommitScreenProps) {
         {/* Back button */}
         <button
           onClick={handleBackClick}
-          className={`absolute top-6 left-6 transition-transform duration-150 ${backPressed ? 'scale-95' : 'scale-100'
-            }`}
+          className={`absolute top-6 left-6 transition-transform duration-150 ${
+            backPressed ? "scale-95" : "scale-100"
+          }`}
         >
           <Image
             src="/game-assets/back-navigation.svg"
@@ -71,7 +76,10 @@ export function CommitScreen({ onBack, onCommit }: CommitScreenProps) {
 
         {/* Top Third - Title */}
         <div className="pt-20">
-          <h1 className="text-4xl md:text-6xl font-bold text-white text-center drop-shadow-lg" style={{ textShadow: '4px 4px 0px rgba(0,0,0,0.5)' }}>
+          <h1
+            className="text-4xl md:text-6xl font-bold text-white text-center drop-shadow-lg"
+            style={{ textShadow: "4px 4px 0px rgba(0,0,0,0.5)" }}
+          >
             HIDE YOUR MINES!
           </h1>
         </div>
@@ -102,8 +110,9 @@ export function CommitScreen({ onBack, onCommit }: CommitScreenProps) {
           <button
             onClick={handleCommitClick}
             disabled={mineCount !== MAX_MINES}
-            className={`transition-transform duration-150 ${commitPressed ? 'scale-95' : 'scale-100 hover:scale-105'
-              } ${mineCount !== MAX_MINES ? 'opacity-50 cursor-not-allowed' : ''}`}
+            className={`transition-transform duration-150 ${
+              commitPressed ? "scale-95" : "scale-100 hover:scale-105"
+            } ${mineCount !== MAX_MINES ? "opacity-50 cursor-not-allowed" : ""}`}
           >
             <Image
               src="/game-assets/start-game-button.svg"
