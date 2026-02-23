@@ -6,6 +6,9 @@ const nextConfig = {
   images: {
     unoptimized: true,
   },
-}
+  experimental: {
+    serverComponentsExternalPackages: ["@aztec/bb.js", "@noir-lang/noir_js"],
+  },
+};
 
-export default nextConfig
+export default nextConfig;
